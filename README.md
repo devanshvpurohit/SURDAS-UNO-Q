@@ -119,8 +119,8 @@ Detailed instructions for deploying on physical Arduino UNO Q hardware are in [D
 ### Automated Setup on Arduino UNO Q (Debian Linux)
 ```bash
 # 1. Clone repository on the board
-git clone https://github.com/devanshvpurohit/SURDAS-UNO-Q.git /opt/surdas
-cd /opt/surdas
+git clone https://github.com/devanshvpurohit/SURDAS-UNO-Q.git
+cd SURDAS-UNO-Q
 
 # 2. Run automated bootstrap (installs apt packages, venv, dashboard build)
 sudo ./scripts/install_uno_q.sh

@@ -1,8 +1,8 @@
 # Core ML/Vision
-torch>=2.0.0,<2.5.0
-torchvision>=0.15.0,<0.20.0
-ultralytics>=8.0.0,<8.3.0
-timm>=0.9.0,<1.0.0
+torch>=2.0.0
+torchvision>=0.15.0
+ultralytics>=8.0.0
+timm>=0.9.0
 
 # OCR
 easyocr>=1.7.0,<2.0.0
@@ -38,8 +38,8 @@ osmnx>=1.6.0,<2.0.0
 shapely>=2.0.0,<3.0.0
 networkx>=3.0,<4.0.0
 
-# GPS (optional - for hardware GPS modules)
-# pyserial>=3.5  # Uncomment if using GPS hardware
+# GPS & MCU Bridge
+pyserial>=3.5
 
 # Utilities
 python-dotenv>=1.0.0  # For .env file support
