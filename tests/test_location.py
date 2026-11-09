@@ -10,8 +10,10 @@ from navigation.location import (
     LocationProvider,
     ManualLocation,
     MockLocationProvider,
+    BridgeLocationProvider,
     InvalidCoordinateError,
     LocationUnavailableError,
+    StaleLocationError,
 )
 
 
@@ -162,6 +164,54 @@ class TestHaversineDistance:
         # 1 degree of latitude is always ~111 km
         dist = provider.haversine_distance(0, 0, 1, 0)
         assert 110_000 < dist < 112_000
+
+
+class TestBridgeLocationProvider:
+    """Test STM32 Bridge-fed GPS Location Provider."""
+
+    def test_bridge_location_initial_state(self):
+        provider = BridgeLocationProvider()
+        assert not provider.is_fixed()
+        with pytest.raises(LocationUnavailableError):
+            provider.get_location()
+
+    def test_bridge_location_valid_update(self):
+        provider = BridgeLocationProvider()
+        packet = {
+            "fix": True,
+            "lat": 17.385044,
+            "lon": 78.486671,
+            "sats": 9,
+            "speed": 1.2
+        }
+        assert provider.update_from_bridge(packet) is True
+        assert provider.is_fixed()
+
+        loc = provider.get_location()
+        assert loc["lat"] == 17.385044
+        assert loc["lon"] == 78.486671
+        assert loc["satellites"] == 9
+        assert loc["fix_quality"] == "FIXED"
+        assert loc["source"] == "STM32_GPS"
+
+    def test_bridge_location_invalid_coords_rejected(self):
+        provider = BridgeLocationProvider()
+        bad_packet = {
+            "fix": True,
+            "lat": 95.0,  # invalid latitude > 90
+            "lon": 78.486671
+        }
+        assert provider.update_from_bridge(bad_packet) is False
+        assert not provider.is_fixed()
+
+    def test_bridge_location_stale_detection(self):
+        provider = BridgeLocationProvider(stale_threshold=0.05)
+        packet = {"fix": True, "lat": 12.9716, "lon": 77.5946, "sats": 6}
+        provider.update_from_bridge(packet)
+        time.sleep(0.08)
+        assert not provider.is_fixed()
+        with pytest.raises(StaleLocationError):
+            provider.get_location()
 
 
 if __name__ == "__main__":

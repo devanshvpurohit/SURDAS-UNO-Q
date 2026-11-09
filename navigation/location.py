@@ -103,6 +103,95 @@ class LocationProvider:
         }
 
 
+# ── Bridge / STM32 GPS Location ──────────────────────────────────────────────
+
+class BridgeLocationProvider(LocationProvider):
+    """
+    LocationProvider that receives real-time GPS fixes from the STM32 microcontroller
+    via the UnoQBridge telemetry stream.
+    
+    Features:
+    - Zero serial contention (uses existing Linux-MCU bridge)
+    - Validates incoming coordinates and fix flags
+    - Detects stale GPS fixes when satellites are lost
+    - Reports satellite count and calculated accuracy
+    """
+
+    def __init__(self, stale_threshold: float = 5.0):
+        self._stale_threshold = stale_threshold
+        self._lat: Optional[float] = None
+        self._lon: Optional[float] = None
+        self._accuracy: float = 99.0
+        self._fix_quality: str = "LOST"
+        self._satellites: int = 0
+        self._speed_knots: float = 0.0
+        self._last_fix_time: float = 0.0
+        self._lock = threading.Lock()
+
+    def update_from_bridge(self, gps_data: dict) -> bool:
+        """
+        Process GPS payload received in STM32 telemetry packet.
+        Expected format:
+            {"fix": true, "lat": 17.385044, "lon": 78.486671, "sats": 8, "speed": 0.0}
+        """
+        if not isinstance(gps_data, dict):
+            return False
+
+        has_fix = bool(gps_data.get("fix", False))
+        lat = gps_data.get("lat")
+        lon = gps_data.get("lon")
+        sats = int(gps_data.get("sats", 0))
+        speed = float(gps_data.get("speed", 0.0))
+
+        if has_fix and lat is not None and lon is not None:
+            try:
+                self.validate_coordinates(float(lat), float(lon))
+                with self._lock:
+                    self._lat = float(lat)
+                    self._lon = float(lon)
+                    self._satellites = sats
+                    self._speed_knots = speed
+                    self._fix_quality = "FIXED" if sats >= 4 else "WEAK"
+                    self._accuracy = max(1.5, round(30.0 / max(1, sats), 1))
+                    self._last_fix_time = time.time()
+                return True
+            except (InvalidCoordinateError, ValueError):
+                with self._lock:
+                    self._fix_quality = "LOST"
+                return False
+        else:
+            with self._lock:
+                self._fix_quality = "LOST"
+            return False
+
+    def get_location(self) -> dict:
+        now = time.time()
+        with self._lock:
+            if self._lat is None or self._lon is None:
+                raise LocationUnavailableError("No GPS fix received from STM32 microcontroller.")
+            if now - self._last_fix_time > self._stale_threshold:
+                raise StaleLocationError(
+                    f"STM32 GPS fix is stale ({now - self._last_fix_time:.1f}s old). Satellite signal lost."
+                )
+            return {
+                "lat": self._lat,
+                "lon": self._lon,
+                "accuracy": self._accuracy,
+                "timestamp": self._last_fix_time,
+                "fix_quality": self._fix_quality,
+                "satellites": self._satellites,
+                "speed_knots": self._speed_knots,
+                "source": "STM32_GPS"
+            }
+
+    def is_fixed(self) -> bool:
+        with self._lock:
+            return (
+                self._fix_quality in ("FIXED", "WEAK")
+                and (time.time() - self._last_fix_time <= self._stale_threshold)
+            )
+
+
 # ── Manual / Test location ────────────────────────────────────────────────────
 
 class ManualLocation(LocationProvider):

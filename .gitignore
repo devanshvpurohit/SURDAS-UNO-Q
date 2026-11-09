@@ -37,6 +37,12 @@ cache/
 *.tmp
 *.temp
 .cache/
+.ua/
+opencode.json
+OVER_ENGINEERING_AUDIT.md
+WAKE_WORD_REPORT.md
+XTTS_SETUP_COMPLETE.md
+azxcvb.py
 
 # Model weights (large files - download separately)
 *.pt

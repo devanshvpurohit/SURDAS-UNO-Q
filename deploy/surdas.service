@@ -1,0 +1,27 @@
+[Unit]
+Description=SURDAS Assistive Vision & Navigation Service (Arduino UNO Q)
+After=network.target local-fs.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/surdas
+Environment=PYTHONUNBUFFERED=1
+Environment=SURDAS_PLATFORM=arduino_uno_q
+Environment=CAMERA_DEVICE=/dev/video0
+ExecStart=/opt/surdas/venv/bin/python3 surdas_brain.py --headless --camera /dev/video0
+Restart=always
+RestartSec=5s
+KillMode=process
+TimeoutStopSec=10
+
+# Hardware & device access
+DeviceAllow=/dev/video0 rw
+DeviceAllow=/dev/video1 rw
+DeviceAllow=/dev/ttyRPMSG0 rw
+DeviceAllow=/dev/ttyHS0 rw
+DeviceAllow=/dev/ttyACM0 rw
+
+[Install]
+WantedBy=multi-user.target

@@ -86,6 +86,7 @@ class VoiceAssistant:
         self._last_audio_chunk_time = 0.0
         self._mic_error_count       = 0
         self._last_wake_detection   = 0.0
+        self._warned_bargein_stt    = False
 
         # Bilingual language state
         self._last_detected_lang = "en"   # updated from STT each utterance
@@ -141,7 +142,7 @@ class VoiceAssistant:
         self._wake_listener_active = True
         threading.Thread(target=self._mic_loop, daemon=True, name="MicLoop").start()
         print("[VOICE] 🎤 Mic listener active — say 'Hey Surdas' / 'सुरदास' or ask any question.")
-        print("[VOICE] 🔊 Wake-word detection enabled DURING TTS for instant barge-in.")
+        print("[VOICE] 🔊 Neural wake word active on every chunk (instant barge-in).")
 
     def stop(self):
         self._running = False
@@ -245,14 +246,24 @@ class VoiceAssistant:
                     self.brain.voice.is_speaking
                     or (time.time() - self.brain.voice.last_speech_time < 0.35)
                 )
+
+                # Neural wake word, one call per chunk, idle or speaking. While idle
+                # we only record the trigger: the command that follows rides the
+                # normal record → transcribe path below, so nothing is dropped
+                # mid-sentence.
+                wake_hit = self.wakeword.process_audio(chunk)
+                if wake_hit and not is_ai_speaking:
+                    self._last_wake_detection = time.time()
+                    print("\n[VOICE] 👂 Wake word heard.", flush=True)
+                    continue
                 
                 # Get current TTS priority to determine echo suppression strategy
                 tts_priority = self.brain.voice.current_priority
                 is_critical_tts = (tts_priority is not None and tts_priority <= 2)  # CRITICAL_SAFETY or NAVIGATION
 
                 if is_ai_speaking:
-                    # STRATEGY 1: Neural wake-word detection (existing - fast, low latency)
-                    if self.wakeword.process_audio(chunk):
+                    # STRATEGY 1: Neural wake-word detection (fast, low latency)
+                    if wake_hit:
                         print("\n[VOICE] ⚡ Barge-in detected (neural)! Interrupting TTS...")
                         self._last_wake_detection = time.time()
                         self.brain.voice.interrupt_for_barge_in()
@@ -306,8 +317,12 @@ class VoiceAssistant:
                                             self.brain.voice.speak("Yes?", priority=__import__("system_state").SpeechPriority.USER_COMMAND, force=True)
                                             continue
                                 except Exception as e:
-                                    # Transcription failed - not critical, continue buffering
-                                    pass
+                                    # Transcription failed - not critical, but never
+                                    # silent: this path is the only wake word left
+                                    # during priority TTS, so a fault here is total.
+                                    if not self._warned_bargein_stt:
+                                        self._warned_bargein_stt = True
+                                        print(f"[VOICE] Barge-in transcription failed: {e}")
                     
                     # Normal echo suppression: discard this chunk from recording
                     # but wake-word detection above still happened

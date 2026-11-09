@@ -1,0 +1,5 @@
+default_profile: arduino_uno_q
+profiles:
+  arduino_uno_q:
+    board: arduino:zephyr:uno_q
+    sketch_path: uno_q_firmware

@@ -42,11 +42,11 @@ def test_classify_depth_proximity():
     """Test depth proximity classification."""
     from config import classify_depth_proximity
     
-    # Test various depth values
-    assert classify_depth_proximity(1500) == "VERY_CLOSE"
-    assert classify_depth_proximity(800) == "CLOSE"
-    assert classify_depth_proximity(400) == "MEDIUM"
-    assert classify_depth_proximity(100) == "FAR"
+    # Test depth values relative to default thresholds (480, 420, 360)
+    assert classify_depth_proximity(500) == "VERY_CLOSE"
+    assert classify_depth_proximity(450) == "CLOSE"
+    assert classify_depth_proximity(390) == "MEDIUM"
+    assert classify_depth_proximity(200) == "FAR"
 
 
 def test_get_proximity_description():

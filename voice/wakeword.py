@@ -4,11 +4,6 @@ import numpy as np
 
 from voice.i18n_phrases import WAKE_WORDS, match as _i18n_match
 
-_OFFLINE_MODE = os.environ.get("OFFLINE_MODE", "0") == "1"
-
-# Flatten all wake phrases across both languages for text matching.
-_ALL_WAKE_PHRASES = WAKE_WORDS["en"] + WAKE_WORDS["hi"]
-
 # Path to our custom trained surdas.onnx wake word model (trained in this repo)
 _SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SURDAS_ONNX = os.path.join(_SCRIPT_DIR, "models", "surdas.onnx")
@@ -28,20 +23,19 @@ class WakeWordDetector:
     Offline-first: no network access at runtime.
     """
 
-    def __init__(self, target_phrases=None, model_path=None):
-        self.target_phrases = _ALL_WAKE_PHRASES
+    def __init__(self, model_path=None):
         self.oww_model = None
         self._surdas_model_key: str = "surdas"
+        # ponytail: fixed threshold is tuned by ear on one mic. Ceiling: a noisy
+        # street needs a per-device value. Upgrade: WAKE_THRESHOLD env var.
+        self.threshold = float(os.environ.get("WAKE_THRESHOLD", 0.6))
+        self._predict_failed = False
         self._init_openwakeword(model_path)
 
     def _init_openwakeword(self, model_path):
-        if _OFFLINE_MODE:
-            print(
-                "[WAKEWORD] OFFLINE_MODE: skipping openWakeWord init. "
-                "Using text-based bilingual wake-word matching."
-            )
-            return
-
+        # NOTE: openWakeWord loads a local .onnx and never touches the network, so
+        # it stays enabled regardless of OFFLINE_MODE. A missing model falls
+        # through to bilingual text matching below.
         try:
             from openwakeword.model import Model
 
@@ -81,8 +75,8 @@ class WakeWordDetector:
         Process raw 16kHz audio chunk through openWakeWord if available.
         Returns True if a wake word is detected.
 
-        Uses threshold 0.6 for our custom surdas.onnx to reduce false positives,
-        and 0.5 for built-in OWW models.
+        Uses WAKE_THRESHOLD (default 0.6) for our custom surdas.onnx to reduce
+        false positives, and 0.5 for built-in OWW models.
         """
         if self.oww_model is not None:
             try:
@@ -93,13 +87,15 @@ class WakeWordDetector:
 
                 prediction = self.oww_model.predict(audio_int16)
                 for model_name, score in prediction.items():
-                    # Use stricter threshold for our custom model to reduce false positives
-                    threshold = 0.6 if model_name == self._surdas_model_key else 0.5
+                    # Stricter threshold for our custom model to reduce false positives
+                    threshold = self.threshold if model_name == self._surdas_model_key else 0.5
                     if score > threshold:
-                        print(f"[WAKEWORD] \u2705 Wake word '{model_name}' triggered (score: {score:.3f} >= {threshold})")
+                        print(f"[WAKEWORD] ✅ Wake word '{model_name}' triggered (score: {score:.3f} >= {threshold})")
                         return True
-            except Exception:
-                pass
+            except Exception as e:
+                if not self._predict_failed:
+                    self._predict_failed = True
+                    print(f"[WAKEWORD] predict() failed, wake word degraded: {e}")
         return False
 
     def check_transcription(self, text: str) -> tuple[bool, str]:

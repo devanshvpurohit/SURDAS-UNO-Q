@@ -57,6 +57,7 @@ _EN_VOICE = None      # System default
 _xtts_model = None
 _xtts_lock = threading.Lock()
 _xtts_speaker_conditioning = None
+_xtts_failed = False  # Coqui import costs ~8s and can be broken; pay it once, not per call.
 
 
 def get_xtts():
@@ -64,35 +65,33 @@ def get_xtts():
     Lazy-load and return the XTTS-v2 model singleton.
     Thread-safe initialization.
     """
-    global _xtts_model, _xtts_speaker_conditioning
+    global _xtts_model, _xtts_speaker_conditioning, _xtts_failed
     
-    if not _XTTS_ENABLED:
+    if not _XTTS_ENABLED or _xtts_failed:
         return None
-    
+
+    # Check the reference voice BEFORE importing Coqui. `from TTS.api import TTS`
+    # pulls in transformers + torch and costs ~8s even when it then fails, and it
+    # is worthless without a speaker reference. Cheap check first.
+    if not _REFERENCE_WAV.exists():
+        print(f"[TTS] No reference voice at {_REFERENCE_WAV} — using system TTS.")
+        return None
+
     with _xtts_lock:
         if _xtts_model is not None:
             return _xtts_model
-        
+
         try:
             print("[TTS] Initializing XTTS-v2...")
             from TTS.api import TTS
-            
+
             # Initialize model (CPU or GPU based on config)
             _xtts_model = TTS(
                 model_name=_XTTS_MODEL,
                 progress_bar=False,
                 gpu=_XTTS_USE_GPU
             )
-            
-            # Verify reference voice exists
-            if not _REFERENCE_WAV.exists():
-                print(f"[TTS ERROR] Reference voice not found: {_REFERENCE_WAV}")
-                print(f"[TTS] Please place a clean 10-20 second WAV file at:")
-                print(f"[TTS]   {_REFERENCE_WAV}")
-                print(f"[TTS] Falling back to system TTS.")
-                _xtts_model = None
-                return None
-            
+
             print(f"[TTS] Reference voice loaded: {_REFERENCE_WAV.name}")
             
             # Cache speaker conditioning for performance (if supported)
@@ -111,10 +110,12 @@ def get_xtts():
             print(f"[TTS ERROR] XTTS not installed: {e}")
             print("[TTS] Install with: pip install TTS torch torchaudio")
             print("[TTS] Falling back to system TTS.")
+            _xtts_failed = True
             return None
         except Exception as e:
             print(f"[TTS ERROR] Failed to initialize XTTS: {e}")
             print("[TTS] Falling back to system TTS.")
+            _xtts_failed = True
             return None
 
 
@@ -323,6 +324,46 @@ class VoiceEngine:
                 time.sleep(0.05)
 
     # ── Audio Playback ───────────────────────────────────────────────────────
+    def _ensure_say(self):
+        """One long-lived `say -f -` process.
+
+        Spawning `say` per utterance costs ~1.6s of AVSpeechSynthesizer + audio
+        session init before the first word — very audible on Bluetooth. A
+        persistent reader pays that once for the life of the process.
+        """
+        with self._proc_lock:
+            if self._proc is not None and self._proc.poll() is None:
+                return self._proc
+            cmd = ["say", "-r", str(_MACOS_RATE), "-f", "-"]
+            self._proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return self._proc
+
+    def _say_macos(self, text: str, lang: str):
+        try:
+            proc = self._ensure_say()
+            proc.stdin.write((text + "\n").encode("utf-8"))
+            proc.stdin.flush()
+        except Exception as ex:
+            print(f"[TTS] macOS 'say' error: {ex}")
+            self._recover_device()
+            return
+
+        # ponytail: `say -f -` gives no per-utterance "done" event, so playback
+        # completion is estimated from word count at _MACOS_RATE. Error is
+        # <100ms against a multi-second utterance. If this ever matters, switch
+        # to AVSpeechSynthesizer (PyObjC) which does emit finish callbacks.
+        est = max(0.4, len(text.split()) / _MACOS_RATE * 60.0 + 0.15)
+        end = time.time() + est
+        while time.time() < end:
+            if self._audio_stop_event.is_set():
+                return
+            time.sleep(0.02)
+
     def _say(self, text: str, lang: str = "en"):
         if not text or not text.strip():
             return
@@ -340,28 +381,7 @@ class VoiceEngine:
         
         # Fallback to system TTS
         if self.is_macos:
-            voice = _HI_VOICE if lang == "hi" else (_EN_VOICE or "")
-            cmd = ["say", "-r", str(_MACOS_RATE)]
-            if voice:
-                cmd += ["-v", voice]
-            cmd += ["--", clean]
-
-            try:
-                with self._proc_lock:
-                    self._proc = subprocess.Popen(
-                        cmd,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                # Wait for process to complete (can be terminated by _interrupt)
-                if self._proc:
-                    self._proc.wait()
-            except Exception as ex:
-                print(f"[TTS] macOS 'say' error: {ex}")
-                self._recover_device()
-            finally:
-                with self._proc_lock:
-                    self._proc = None
+            self._say_macos(clean, lang)
 
         elif self._pyttsx:
             try:

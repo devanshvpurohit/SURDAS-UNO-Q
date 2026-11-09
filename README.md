@@ -1,622 +1,223 @@
-# SURDAS - Real-Time Assistive Vision and Local Voice Assistant with Indoor Navigation
+# SURDAS UNO Q — Assistive Vision & Navigation System
 
-SURDAS is an AI-assisted perception and voice assistant for low-cost visually-impaired use-cases. It combines real-time computer vision (YOLOv8 object detection, MiDaS relative depth estimation, Indian banknote recognition, and EasyOCR text reading) with a fully offline/self-hosted voice assistant system (Silero VAD, Wake Word Detection, Whisper STT, Command Router, Local LLM via Ollama, and TTS).
+[![Arduino UNO Q CI](https://github.com/devanshvpurohit/VNR/actions/workflows/uno_q_ci.yml/badge.svg)](https://github.com/devanshvpurohit/VNR/actions/workflows/uno_q_ci.yml)
+![Platform](https://img.shields.io/badge/Platform-Arduino%20UNO%20Q-00979D?logo=arduino)
+![Linux MPU](https://img.shields.io/badge/MPU-Qualcomm%20QRB2210-red)
+![MCU](https://img.shields.io/badge/MCU-STM32U585%20Cortex--M33-orange)
+![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.13-blue)
+![Dashboard](https://img.shields.io/badge/Dashboard-React%2018%20%2B%20Tailwind-61dafb?logo=react)
 
-**NEW: Indoor Navigation & Spatial Memory** — SURDAS now supports blindfold navigation in indoor environments with spatial memory for room/object labeling, deterministic safety-first navigation, and same-utterance wake-word detection ("Surdas, guide me to the door").
+SURDAS is an integrated, deterministic assistive vision and navigation platform re-architected for the **Arduino UNO Q** hybrid single-board computer.
 
-**⚠️ IMPORTANT LIMITATIONS:**
-- **MiDaS provides RELATIVE depth/proximity estimation, NOT metric distance.** Announcements like "nearby" or "very close" are based on relative depth values, not calibrated measurements in meters.
-- **Indoor navigation is approximate without IMU/odometry.** Position tracking relies on perception and memory, not precise measurements.
-- **Real-world outdoor navigation requires GPS hardware.** Without GPS, navigation uses manual test coordinates only.
-- **Safety features are assistive tools, not collision avoidance systems.** Always exercise caution and manual awareness.
+The system combines high-level computer vision, spatial memory, and deterministic guidance running on the **Qualcomm QRB2210 Linux MPU** with real-time motion acquisition and low-latency safety controls executing on the **STM32U585 Microcontroller (MCU)**.
 
----
-
-## 🖥️ User Interfaces
-
-SURDAS offers two modern interfaces for different use cases:
-
-### 1. Tkinter Desktop GUI (New!)
-**Modern native desktop application with real-time monitoring**
-
-```bash
-# Quick launch with GUI
-./launch_gui.sh
-
-# Or launch directly from surdas_brain.py
-python3 surdas_brain.py --gui
-
-# Or from test pipeline
-python3 test_ai_pipeline.py --gui
-
-# With custom model and audio settings
-python3 surdas_brain.py --gui --model gemma3:1b --mic airpods --mic-gain 2.0
-```
-
-**Features**:
-- 🎨 Modern gradient-based UI with three-column layout
-- 📹 Live camera feed display (20 FPS)
-- 🎛️ System controls (Start/Stop, Mode selection, Flashlight)
-- 🧭 Indoor navigation monitoring (state, confidence, destination)
-- 📊 Real-time statistics (FPS, object count, uptime)
-- 🧠 Spatial memory display (rooms & landmarks)
-- 📜 Color-coded activity logs with timestamps
-- 🖱️ Native desktop experience with tkinter (built-in Python)
-
-**Requirements**: `Pillow>=10.0.0` (for image display; tkinter is built into Python)
-
-### CLI Arguments
-
-Both `surdas_brain.py` and `test_ai_pipeline.py` support the following arguments:
-
-```bash
-# Launch with GUI
-python3 surdas_brain.py --gui
-
-# Specify LLM model
-python3 surdas_brain.py --model gemma3:1b
-
-# Specify microphone device
-python3 surdas_brain.py --mic airpods
-python3 surdas_brain.py --mic boat
-python3 surdas_brain.py --mic 0  # Device index
-
-# Adjust microphone gain
-python3 surdas_brain.py --mic-gain 2.0
-
-# Combine arguments
-python3 surdas_brain.py --gui --model gemma3:1b --mic airpods --mic-gain 2.0
-python3 test_ai_pipeline.py --gui --mic boat --mic-gain 1.5
-```
-
-**Terminal Mode (Default)**:
-```bash
-python3 surdas_brain.py              # OpenCV window
-python3 test_ai_pipeline.py          # OpenCV window
-```
-
-**GUI Mode (Tkinter)**:
-```bash
-python3 surdas_brain.py --gui        # Tkinter GUI
-python3 test_ai_pipeline.py --gui    # Tkinter GUI
-./launch_gui.sh                      # Convenience script
-```
-
-### 2. Web-Based Caregiver Dashboard
-**React + TypeScript dashboard for remote monitoring**
-
-```bash
-# Terminal 1: Start SURDAS backend
-python3 surdas_brain.py
-
-# Terminal 2: Start dashboard
-cd caregiver_dashboard
-npm install
-npm run dev
-```
-
-**Features**:
-- 🌐 Web-based interface accessible from any device
-- 📱 Responsive design (desktop, tablet, mobile)
-- 🔄 WebSocket real-time updates
-- 🗺️ Interactive OpenStreetMap integration
-- 📊 Event timeline with filtering
-- 💬 Speech command history
-- 🎨 Modern Tailwind CSS design
-- 🚨 **Fall Detection Integration** (NEW!)
-  - Real-time IMU data from ESP32 (`http://192.168.4.2/imu`)
-  - Automatic emergency alerts on fall confirmation
-  - Live acceleration, pitch, and roll monitoring
-  - Fall counter with state tracking (NORMAL/POSSIBLE_FALL/IMPACT_DETECTED/FALL_CONFIRMED)
-  - Color-coded visual indicators
-
-**Recommended for**: Caregivers monitoring from another room/device
-
-**Fall Detection Docs**: See [FALL_DETECTION_SUMMARY.md](FALL_DETECTION_SUMMARY.md) for complete guide
+> [!IMPORTANT]
+> **Key Architecture Changes in Arduino UNO Q Remake:**
+> - **Zero ESP32 runtime dependencies:** Replaced ESP32-CAM and ESP32-IMU HTTP endpoints with a native Linux Hardware Abstraction Layer (V4L2/USB auto-discovery) and STM32 firmware bridge.
+> - **Zero Ollama / LLM dependencies:** Replaced conversational LLM processing with a deterministic rule-based command router, spatial queries, and safety-validated state machines.
+> - **Unified Local Telemetry & Static Dashboard:** Live video streaming, REST API, WebSockets, sensor monitoring, and the compiled React Caregiver Dashboard are served directly on port `8000` (no external servers or cloud accounts required).
+> - **Hardware Abstraction Layer (HAL):** Modular providers with clean mock fallbacks allow full development, testing, and UI preview without attached hardware.
+> - **Automated GitHub Deployment:** Includes systemd service units, provisioning scripts, and GitHub Actions CI. See [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 
-##  System Architecture
-```
-SURDAS
-|
-+--------------+--------------+
-|               |               |
-v               v               v
-Vision System   Voice System    Spatial Memory
-|               |               |
-ESP32-CAM       Microphone      SQLite DB
-|               |               |
-OpenCV/YOLO     VAD (Silero)    Rooms/Objects
-|               |               |
-Depth (MiDaS)   Speech-to-Text  Landmarks
-|            (faster-whisper)  |
-Object Detection    |               |
-|               |               |
-+-------------+---------------+---------------+
-|
-v
-Indoor Perception & Navigation
-|
-+-----------------+------------------+
-|                 |                  |
-v                 v                  v
-Free-Space    Command Router   Safety Controller
-Detection     |                  |
-|             +-------+----------+-------+
-|             |       |       |       |
-|             v       v       v       v
-|         Nav Mode  OCR  Torch  Room Label
-|             |       |       |       |
-+-------------+-------+-------+-------+--------+
-|
-v
-Vision Context → Local LLM (Ollama) → TTS → Speaker
-```
----
+## 🏛️ System Architecture
 
-## 📁 Package Structure
-```
-surdas/
-├── voice/
-│  ├── __init__.py
-│  ├── vad.py           # Voice Activity Detection (Silero VAD + Energy Fallback)
-│  ├── wakeword.py        # Wake Word Detection (same-utterance support)
-│  ├── stt.py           # Speech to Text (faster-whisper / Whisper)
-│  ├── tts.py           # Unified Text-to-Speech (Piper + pyttsx3)
-│  ├── llm.py           # Local LLM integration (Ollama with live Vision Context)
-│  ├── command_router.py     # Deterministic Command Router with indoor nav support
-│  ├── assistant.py        # Non-blocking audio capture & background listener
-│  └── i18n_phrases.py      # Bilingual (EN/HI) command phrase dictionary
-├── navigation/
-│  ├── __init__.py
-│  ├── map_manager.py       # Offline OpenStreetMap management
-│  ├── router.py          # Pedestrian routing (Dijkstra on OSM graph)
-│  ├── navigator.py        # Turn-by-turn outdoor navigation
-│  ├── geocoder.py         # Offline place search
-│  ├── location.py         # GPS provider abstraction
-│  └── voice_guidance.py     # Navigation instruction generation
-├── spatial_memory.py       # **NEW** Persistent room/object/landmark memory (SQLite)
-├── indoor_perception.py     # **NEW** Free-space detection, occupancy grid, safe directions
-├── indoor_navigator.py      # **NEW** Safety-first indoor navigation controller
-├── surdas_brain.py        # Main Unified Vision & Voice System
-├── currency_detector.py     # Indian Banknote Recognition (Rs. 10 - Rs. 500)
-├── config.py           # Centralized configuration (thresholds, GPS, paths)
-├── logger.py           # Subsystem logging (VISION, GPS, NAV, VOICE)
-├── telemetry.py          # Caregiver dashboard broadcast
-├── test_indoor_navigation.py # **NEW** Test suite for blindfold scenarios
-├── surdas_esp32_cam/
-│  └── surdas_esp32_cam.ino  # ESP32-CAM Firmware
-├── requirements.txt
-└── README.md
-```
----
+```mermaid
+flowchart TD
+    subgraph Arduino_UNO_Q["Arduino UNO Q Hardware"]
+        subgraph MCU["STM32U585 Microcontroller (MCU / Zephyr OS)"]
+            IMU_HW["MPU6050 / Motion Sensors (I2C)"]
+            FALL_STATE["50Hz Fall Detection Engine"]
+            ESTOP["Physical E-Stop Latch (D2 Interrupt)"]
+            BUZZER["Haptic Buzzer / Alarm (D8)"]
+            RELAY["Motor Power Cutoff Relay (D7)"]
+        end
 
-##  Core Features
+        BRIDGE["Internal Inter-Processor Bridge / Serial (115200 baud)"]
 
-### ✅ WORKING FEATURES
-- **Object Detection**: YOLOv8n real-time detection with relative proximity estimation
-- **Relative Depth Perception**: MiDaS provides proximity categories (very close, nearby, medium distance, far)
-- **Wall & Barrier Detection**: Dense depth analysis for continuous surfaces
-- **Indoor Navigation**: Waypoint-free reactive navigation with spatial memory
-- **Spatial Memory**: Persistent room/object/landmark labeling and recall (SQLite)
-- **Safety-First Navigation**: Automatic safety-hold on camera failure, obstacles, or low confidence
-- **Same-Utterance Wake**: "Surdas, command" works in single phrase (no "Hey" required)
-- **Indian Currency Recognition**: OCR + color-based denomination detection with confidence categories
-- **Text Reading (OCR)**: EasyOCR for English and Hindi text
-- **Offline Voice Assistant**: Wake word detection, Whisper STT, command routing, Ollama LLM integration
-- **Offline Pedestrian Navigation**: Uses pre-downloaded OpenStreetMap data (requires online setup once)
-- **Fall Detection Dashboard**: Real-time IMU monitoring from ESP32 with automatic emergency alerts (see [FALL_DETECTION_SUMMARY.md](FALL_DETECTION_SUMMARY.md))
+        subgraph MPU_LINUX["Qualcomm QRB2210 (MPU / Debian Linux)"]
+            HAL_CAM["Camera Provider (V4L2 / USB / Mock)"]
+            YOLO["YOLOv8 Object Detection (PyTorch/ONNX)"]
+            MIDAS["MiDaS Relative Proximity"]
+            INDOOR_NAV["Deterministic Indoor Navigator (State Machine)"]
+            SPATIAL["SQLite Spatial Memory (spatial_memory.db)"]
+            VOICE_ROUTER["Rule-Based Command Router (Bilingual EN/HI)"]
+            TELEMETRY["Unified Telemetry & Video Server (FastAPI :8000)"]
+        end
+    end
 
-### 🔧 REQUIRES HARDWARE
-- **GPS Navigation**: Real-world dynamic outdoor navigation requires a GPS module (USB/Bluetooth serial GPS)
-- **ESP32-CAM**: Optional wireless camera (can use local webcam for testing)
-- **ESP32 with IMU**: Optional fall detection (MPU6050/MPU9250) at `http://192.168.4.2/imu`
+    subgraph CLIENTS["Caregiver & User Interfaces"]
+        DASHBOARD["Caregiver Dashboard (React + Vite :5173)"]
+        AUDIO_IO["Local Microphone & Speaker (pyttsx3)"]
+    end
 
-### 🧪 EXPERIMENTAL / OPTIONAL
-- **Ollama LLM Integration**: Conversational AI for visual Q&A (requires Ollama server)
-- **Caregiver Dashboard**: Real-time telemetry web interface
+    IMU_HW --> FALL_STATE
+    FALL_STATE --> BUZZER
+    ESTOP --> RELAY
+    FALL_STATE <--> BRIDGE
+    BRIDGE <--> MPU_LINUX
 
----
+    HAL_CAM --> YOLO
+    HAL_CAM --> MIDAS
+    YOLO --> INDOOR_NAV
+    MIDAS --> INDOOR_NAV
+    SPATIAL <--> INDOOR_NAV
+    AUDIO_IO <--> VOICE_ROUTER
+    VOICE_ROUTER <--> INDOOR_NAV
 
-## 🏠 Indoor Navigation & Blindfold Usage
-
-### Overview
-SURDAS now supports **indoor navigation for blindfold scenarios** with:
-- **Spatial Memory**: Remember rooms, objects, and landmarks
-- **Deterministic Navigation**: Safety-first reactive guidance (never LLM-controlled)
-- **Free-Space Detection**: Real-time occupancy mapping from YOLO + MiDaS
-- **Navigation Confidence**: HIGH/MEDIUM/LOW/INVALID scoring
-- **Safety-Hold State**: Automatic pause on camera failure or obstacles
-- **Bilingual Commands**: English and Hindi support
-
-### Key Commands
-
-#### Room & Object Labeling
-```
-"Surdas, this is the bedroom"              # Label current room
-"Surdas, label this as kitchen entrance"   # Save landmark
-"Surdas, this is a chair"                  # Label detected object
-```
-
-#### Spatial Queries
-```
-"Surdas, where is the chair?"              # Find remembered object
-"Surdas, what room is this?"               # Identify current room
-"Surdas, describe surroundings"            # List nearby objects
-"Surdas, list rooms"                       # List all remembered rooms
-```
-
-#### Indoor Navigation
-```
-"Surdas, guide me to the door"             # Navigate to object
-"Surdas, take me to kitchen entrance"      # Navigate to landmark
-"Surdas, pause navigation"                 # Pause guidance
-"Surdas, resume navigation"                # Resume guidance
-"Surdas, stop navigation"                  # Cancel navigation
-```
-
-### Navigation States
-
-1. **IDLE**: Not navigating, spatial queries only
-2. **NAVIGATING**: Active guidance toward destination
-3. **SAFETY_HOLD**: Paused due to:
-   - Camera failure (no depth data)
-   - Stale perception (>2s old)
-   - Low confidence (obstacles blocking view)
-   - Obstacle too close (<0.8m)
-   - User requested pause
-4. **APPROACHING**: Close to destination (<1.5m)
-5. **ARRIVED**: Destination reached
-
-### Safety Features
-
-**Automatic Safety-Hold Triggers:**
-- Camera failure or invalid depth data → "camera not working, please check"
-- Obstacles very close (>0.9 relative depth) → "Stop! Obstacle very close"
-- Low navigation confidence → "Pausing: limited visibility"
-- Stale perception (>2 seconds) → "Lost camera view, reconnecting"
-
-**Movement Commands Only When:**
-- Navigation confidence >= MEDIUM
-- Perception data < 2 seconds old
-- No critical obstacles detected
-- Camera functioning normally
-
-### Blindfold Testing Protocol
-
-1. **Setup Phase**
-   ```bash
-   python surdas_brain.py  # Start system
-   # Put on blindfold, ensure camera is working
-   ```
-
-2. **Exploration Phase**
-   ```
-   "Surdas, this is the living room"       # Label room
-   # Walk around, let camera detect objects
-   "Surdas, describe surroundings"         # Hear what's detected
-   "Surdas, remember this as sofa"         # Label object
-   ```
-
-3. **Navigation Phase**
-   ```
-   "Surdas, guide me to the sofa"          # Start navigation
-   # Follow voice guidance:
-   # "Move forward. Path is clear for 3 metres."
-   # "Turn left about 30 degrees, then move forward."
-   # "Almost there. Sofa is very close."
-   # "Arrived! Sofa should be right in front of you."
-   ```
-
-4. **Safety Testing**
-   ```
-   # Cover camera → automatic safety-hold
-   # Place obstacle in path → system detects and warns
-   # Low light conditions → system reports low confidence
-   ```
-
-### Testing the System
-
-Run comprehensive test suite:
-```bash
-# All tests
-python test_indoor_navigation.py --test all
-
-# Individual tests
-python test_indoor_navigation.py --test spatial_memory
-python test_indoor_navigation.py --test perception
-python test_indoor_navigation.py --test navigation
-python test_indoor_navigation.py --test wakeword
-python test_indoor_navigation.py --test blindfold_simulation
-```
-
-Expected output:
-```
-✅ SPATIAL MEMORY: ALL TESTS PASSED
-✅ INDOOR PERCEPTION: ALL TESTS PASSED
-✅ INDOOR NAVIGATION CONTROLLER: ALL TESTS PASSED
-✅ WAKE-WORD DETECTION: ALL TESTS PASSED
-✅ BLINDFOLD SCENARIO SIMULATION: ALL TESTS PASSED
-
-🎉 ALL TESTS PASSED - INDOOR NAVIGATION READY FOR BLINDFOLD USE
-```
-
-### Spatial Memory Database
-
-Location: `spatial_memory.db` (SQLite)
-
-**Schema:**
-- `rooms`: Room definitions with boundaries
-- `objects`: Detected objects with positions, confidence, timestamps
-- `landmarks`: User-labeled navigation points
-- `spatial_relations`: Object relationships
-
-**Maintenance:**
-```python
-from spatial_memory import SpatialMemory
-
-memory = SpatialMemory()
-
-# View statistics
-stats = memory.get_stats()
-print(f"Rooms: {stats['rooms']}, Objects: {stats['objects']}")
-
-# Clear stale objects (not seen in >1 hour)
-memory.clear_stale_objects(max_age_seconds=3600)
-
-# Export to JSON
-json_data = memory.export_to_json()
-```
-
-### Hindi Commands
-
-All indoor navigation commands work in Hindi:
-```
-"सुरदास, यह बेडरूम है"                    # This is the bedroom
-"सुरदास, कुर्सी कहाँ है?"                 # Where is the chair?
-"सुरदास, मुझे दरवाजे तक ले चलो"          # Guide me to the door
-"सुरदास, आसपास बताओ"                     # Describe surroundings
-"सुरदास, नेविगेशन रोको"                   # Stop navigation
-```
-
-### Configuration
-
-Edit `config.py` for thresholds:
-```python
-# Indoor Navigation
-PERCEPTION_MAX_AGE_S = 2.0          # Max perception staleness
-ARRIVAL_THRESHOLD_M = 0.5           # Distance to consider "arrived"
-OBSTACLE_CRITICAL_M = 0.8           # Trigger safety-hold distance
-MIN_CONFIDENCE_TO_MOVE = "MEDIUM"   # Minimum confidence for movement
-
-# Depth Classification
-DEPTH_VERY_CLOSE_THRESHOLD = 0.8    # Relative depth (higher = closer)
-DEPTH_CLOSE_THRESHOLD = 0.6
-DEPTH_MEDIUM_THRESHOLD = 0.4
+    INDOOR_NAV --> TELEMETRY
+    HAL_CAM --> TELEMETRY
+    TELEMETRY <--> DASHBOARD
 ```
 
 ---
 
-The assistant wakes up on either "Hey Surdas" or "Surdas":
+## ⚙️ Target Environments & Work division
 
-### Voice System Features
+### 1. Linux MPU Computing (`Qualcomm QRB2210 / Debian Linux`)
+- **Python Application Runtime**: Main orchestrator (`surdas_brain.py`).
+- **Camera Ingestion**: OpenCV / V4L2 device auto-discovery (`/dev/video*`) with graceful disconnection recovery and synthetic mock camera fallback (`hal/camera.py`).
+- **Object & Obstacle Detection**: YOLOv8n inference with bounding boxes and confidence filtering (`hal/vision.py`).
+- **Relative Depth Perception**: MiDaS relative inverse depth classification (`VERY_CLOSE`, `CLOSE`, `MEDIUM`, `FAR`). *Relative inverse depth, not metric distance.*
+- **Deterministic Indoor Navigation**: State machine (`IDLE`, `NAVIGATING`, `SAFETY_HOLD`, `APPROACHING`, `ARRIVED`) in `indoor_navigator.py`.
+- **Persistent Spatial Memory**: SQLite storage for rooms, landmarks, objects, and spatial relationships (`spatial_memory.py`).
+- **Rule-Based Bilingual Voice Assistant**: English and Hindi command recognition and spoken guidance via `pyttsx3` (`voice/command_router.py`).
+- **Caregiver Telemetry Service**: FastAPI backend serving REST endpoints (`/health`, `/imu`, `/location`), WebSocket events (`/ws`), and MJPEG preview (`/video_feed`).
 
-**🎙️ XTTS-v2 Voice Cloning (NEW!)**
-- Natural voice cloning using your reference voice
-- Any language supported by XTTS-v2
-- In-memory audio generation (no temporary files)
-- Preserves all priority and barge-in features
-- Graceful fallback to system TTS
-- See [XTTS_QUICKSTART.md](XTTS_QUICKSTART.md) for setup
-
-### 1. Deterministic Commands (Zero Latency, No LLM required):
-Navigation: "Hey Surdas, start navigation" or "Navigation mode"
-Read Text: "Hey Surdas, read text" or "Read this sign" (automatically turns on torch, snaps image, reads aloud, and turns off torch)
-Flashlight On: "Hey Surdas, turn on light" or "Torch on"
-Flashlight Off: "Hey Surdas, turn off light" or "Torch off"
-Fast Scene Check: "Hey Surdas, what do you see?" or "What is in front of me?"
-Stop / Silence: "Hey Surdas, stop" or "Silence"
-Status: "Hey Surdas, status"
-
-### 2. Conversational / Visual Q&A (Powered by Local Ollama):
-"Hey Surdas, is there a chair I can sit on?"
-"Hey Surdas, where is the person standing?"
-(The local LLM is automatically provided with the live vision context: detected objects, proximity, and torch status to answer accurately.)
----
-
-## OFFLINE NAVIGATION
-
-SURDAS includes a fully offline pedestrian navigation system using OpenStreetMap data.
-
-**⚠️ CRITICAL REQUIREMENTS:**
-- **Map data must be downloaded once while online** (see setup below)
-- **Real navigation requires GPS hardware** (USB/Bluetooth GPS module with NMEA output)
-- **Without GPS**: System uses manual test coordinates for development only
-
-### Setup (One-Time, Requires Internet)
-
-1. Install dependencies:
-```bash
-pip install osmnx networkx shapely
-```
-
-2. Download map data for your area:
-```bash
-python setup_offline_maps.py --place "Hyderabad, Telangana, India"
-```
-
-3. Verify offline readiness:
-```bash
-python -m navigation.offline_test
-```
-
-### GPS Configuration (For Real Navigation)
-
-Edit environment variables or `config.py`:
-```bash
-export SURDAS_GPS_ENABLED=true
-export SURDAS_GPS_PORT=/dev/ttyUSB0  # Your GPS serial port
-export SURDAS_GPS_BAUD=9600
-```
-
-### Usage
-
-After setup, start SURDAS and say:
-> "Hey SURDAS, navigate to Charminar."
-> "सुरदास, चारमीनार तक ले चलो।"
-> "सुरदास, चारमीनार तक ले चलो।"
-
-- Routing uses the locally stored graph (no Google Maps).
-- Different cities/regions require their own offline map package.
-- The map data can become outdated and should periodically be refreshed while online.
-- No live internet routing is used during offline operation.
-- **Safety Note**: GPS does not provide exact positioning. SURDAS announcements are assistive guidance only. ALWAYS check traffic manually before crossing streets or making navigation decisions.
+### 2. Microcontroller Control (`STM32U585 / Arduino Core`)
+- **Deterministic Sensor Acquisition**: 50Hz MPU6050 reading over I2C.
+- **Hardware Fall Detection**: Autonomous multi-stage state machine (`NORMAL` → `FREEFALL` → `IMPACT` → `FALL_CONFIRMED`).
+- **Deterministic Safety Cutoff**: Physical E-Stop pin interrupt immediately disables motor relay and triggers buzzer alarm with zero dependency on the Linux OS.
+- **Microcontroller Bridge**: Serial/RPC telemetry packets streamed at 10Hz to the Linux MPU. Firmware located in `sketch/uno_q_firmware/uno_q_firmware.ino`.
 
 ---
 
-## How to Run
+## 🚀 Quickstart & Deployment
 
-### Prerequisites
+Detailed instructions for deploying on physical Arduino UNO Q hardware are in [DEPLOYMENT.md](DEPLOYMENT.md).
+
+### Automated Setup on Arduino UNO Q (Debian Linux)
 ```bash
-# Install dependencies
+# 1. Clone repository on the board
+git clone https://github.com/devanshvpurohit/VNR.git /opt/surdas
+cd /opt/surdas
+
+# 2. Run automated bootstrap (installs apt packages, venv, dashboard build)
+sudo ./scripts/install_uno_q.sh
+
+# 3. Flash STM32 MCU & start background service
+sudo ./scripts/flash_firmware.sh
+sudo ./scripts/deploy_service.sh
+```
+Once deployed, open `http://<arduino-uno-q-ip>:8000` in any web browser to access the live Caregiver Dashboard!
+
+### Hardware-Free Simulation / Local Development
+You can run and verify the complete application without any physical sensors or cameras attached:
+
+```bash
+# 1. Install dependencies
 pip install -r requirements.txt
 
-# (Optional) Download offline models once while online
-python setup_offline_models.py
+# 2. Run in headless simulation mode:
+python3 surdas_brain.py --headless --mock-camera --mock-sensors
 
-# (Optional) Set up offline maps for your area
-python setup_offline_maps.py --place "Your City, Country"
+# 3. Open http://localhost:8000 in your browser to view the Caregiver Dashboard
 ```
-
-### Running SURDAS
-
-1. (Optional) Start Ollama for conversational AI:
-```bash
-ollama serve
-ollama run llama3.2
-```
-
-2. Run SURDAS:
-```bash
-cd /path/to/your/suradas
-python3 surdas_brain.py
-```
-
-**Keyboard Fallbacks**: 
-- `[N]` Navigation Mode
-- `[T]` Read Text
-- `[L]` Toggle Flashlight
-- `[A]` AI Voice Mode (NEW!)
-- `[Q]` Quit
+The FastAPI backend serves the pre-built React application directly from `caregiver_dashboard/dist` alongside WebSocket and MJPEG video streaming. (For dashboard development, run `npm run dev` in `caregiver_dashboard` to use Vite HMR on `:5173`).
 
 ---
 
-## 🎙️ AI Voice Mode
+## 🔌 Hardware Setup & Verification
 
-**NEW: Interactive AI Assistant with Vision Pause**
+### 1. Connecting a Camera on Arduino UNO Q
+- Connect a standard UVC USB webcam to the Arduino UNO Q USB host port.
+- Test camera detection:
+  ```bash
+  python3 -c "from hal.camera import scan_available_cameras; print(scan_available_cameras())"
+  ```
+- Specify an explicit camera device if multiple cameras are attached:
+  ```bash
+  python3 surdas_brain.py --camera /dev/video0
+  ```
 
-Press the `[A]` key to activate AI Voice Mode for quick conversational questions without vision interruptions.
-
-### Features
-- ✓ **Single-Key Activation**: Press 'A' to instantly activate
-- ✓ **Vision Pause**: All vision and safety workers pause during AI mode
-- ✓ **Single Question Mode**: System answers ONE question then auto-exits
-- ✓ **Auto-Resume**: Vision and safety automatically resume after exit
-- ✓ **Echo Cancellation**: Triple-layer protection prevents feedback loops
-- ✓ **Ollama Integration**: Uses local Llama 3.2 model
-
-### Quick Start
+### 2. Flashing the STM32 Microcontroller
+The Arduino UNO Q uses the **Arduino App Lab** or **Arduino CLI**:
 ```bash
-# Start SURDAS
-python3 surdas_brain.py
-
-# Press 'A' key → Ask question → System auto-exits
+# Using Arduino CLI:
+arduino-cli compile --config-file sketch/sketch.yaml sketch/uno_q_firmware
+arduino-cli upload -p /dev/ttyRPMSG0 --config-file sketch/sketch.yaml sketch/uno_q_firmware
 ```
 
-### Example Questions
-- "What's the weather today?"
-- "Tell me a joke"
-- "How does SURDAS work?"
-- "Calculate 25 times 37"
-
-### Safety Note
-⚠️ AI mode pauses obstacle detection. Use only when stationary in a safe location.
-
-### Documentation
-- **Complete Guide**: [AI_VOICE_MODE_GUIDE.md](AI_VOICE_MODE_GUIDE.md)
-- **Quick Reference**: [AI_MODE_QUICK_REF.md](AI_MODE_QUICK_REF.md)
-- **Testing**: Run `python3 test_ai_mode.py`
+#### Pinout Configuration (Conflict-Free Header Mapping):
+| Peripheral | Pin(s) on UNO Q | Protocol | Notes |
+| :--- | :--- | :--- | :--- |
+| **Emergency Stop Button** | **D2** (INT0) | External Interrupt | Active-low physical latch; instant power cutoff |
+| **Motor Relay Cutoff** | **D7** | Digital Output | Active-high motor driver enable |
+| **Haptic Buzzer** | **D8** | Digital Output | Audible safety & collision alarm |
+| **Status LED** | **A0** | Digital Output | Reassigned to A0 to avoid SPI clock conflict |
+| **SPI TFT Display (ST7789/ST7735)** | **D13** (SCK), **D11** (MOSI), **D10** (CS), **D9** (DC), **D6** (RST), **D5** (BL) | Hardware SPI | 5Hz live graphical dashboard |
+| **I2C IMU (MPU6050/LSM6DSOX)** | **A4** (SDA), **A5** (SCL) | I2C (400 kHz) | 50Hz deterministic fall detection sampling |
+| **UART GPS (NEO-6M / NEO-M8N)** | **D0** (RX), **D1** (TX) or `Serial1` | UART (9600 baud) | $GPRMC/$GPGGA parser; streams lat/lon/sats to bridge |
 
 ---
 
-## Testing
+## 🎙️ Deterministic Voice Commands
 
-Run the test suite:
+SURDAS handles all voice interactions deterministically without requiring an LLM or network connection:
+
+| Command (English) | Command (Hindi) | Action |
+| :--- | :--- | :--- |
+| *"Surdas, describe surroundings"* | *"क्या दिख रहा है"* | Reports detected objects and closest obstacle. |
+| *"Surdas, what room is this?"* | *"यह कौन सा कमरा है"* | Queries SQLite spatial memory for current room. |
+| *"Surdas, remember this room as bedroom"* | *"इस कमरे को बेडरूम याद रखो"* | Saves room boundary to spatial memory. |
+| *"Surdas, guide me to the chair"* | *"कुर्सी तक ले चलो"* | Initiates deterministic indoor navigation. |
+| *"Surdas, pause navigation"* | *"नेविगेशन रोको"* | Transitions state to `SAFETY_HOLD`. |
+| *"Surdas, resume navigation"* | *"नेविगेशन फिर से शुरू करो"* | Validates camera and resumes navigation. |
+| *"Surdas, stop navigation"* | *"नेविगेशन बंद करो"* | Returns state to `IDLE`. |
+
+---
+
+## 📋 Feature Implementation Matrix
+
+| Feature | Status | Notes |
+| :--- | :--- | :--- |
+| **OpenCV Camera Ingestion** | ✅ Verified | V4L2 device auto-discovery with synthetic mock fallback. |
+| **YOLOv8 Object Detection** | ✅ Verified | YOLOv8n running with configurable confidence and latency logging. |
+| **MiDaS Relative Depth** | ✅ Verified | Categorized into proximity bands; no false metric claims. |
+| **Indoor Navigation** | ✅ Verified | Deterministic state machine with obstacle holds and arrival logic. |
+| **Spatial Memory** | ✅ Verified | Offline SQLite database (`spatial_memory.db`) for rooms & landmarks. |
+| **Deterministic Voice Routing** | ✅ Verified | Bilingual rule-based dispatcher; zero Ollama runtime requirement. |
+| **Caregiver Dashboard** | ✅ Verified | Production React build with MJPEG feed, WebSocket telemetry, and E-Stop. |
+| **Fall Detection** | 🟡 Simulated / Verified on MCU | Hardware state machine implemented in STM32 C++; simulated fallback clearly labeled `[SIMULATION]`. |
+| **Emergency Stop** | ✅ Verified | Non-AI deterministic hardware cutoff and UI button. |
+| **Outdoor GPS** | ⚪ Optional | Serial GPS driver preserved; falls back to manual test coordinates. |
+
+---
+
+## 🧪 Automated Testing
+
+SURDAS includes a suite of 56 hardware-independent tests that execute in seconds without attached sensors or physical cameras:
+
 ```bash
-# Run all tests
-python -m pytest tests/ -v
-
-# Run with coverage
-python -m pytest tests/ --cov=. --cov-report=html
-
-# Run specific test file
-python -m pytest tests/test_location.py -v
+# Run all tests:
+pytest
 ```
 
----
-
-## Configuration
-
-See `config.py` for all configurable parameters. Key settings can be overridden via environment variables (prefix with `SURDAS_`).
-
-Example `.env` file:
-```bash
-SURDAS_GPS_ENABLED=true
-SURDAS_GPS_PORT=/dev/ttyUSB0
-SURDAS_ESP32_IP=192.168.4.1
-SURDAS_LOG_LEVEL=INFO
-SURDAS_DEPTH_VERY_CLOSE=1200
-SURDAS_DEPTH_CLOSE=650
-```
+Test coverage includes:
+- `tests/test_camera_hal.py`: Auto-discovery, mock camera, failure handling, and frame acquisition.
+- `tests/test_vision_hal.py`: Object detection output validation, depth map dimensions, and OCR.
+- `tests/test_imu_hal.py`: Real vs simulated telemetry tagging, fall events, and missing hardware handling.
+- `tests/test_bridge_hal.py`: Command dispatch, hardware E-Stop, and telemetry polling.
+- `tests/test_indoor_nav.py`: Navigation state transitions, safety-hold triggers, and pause/resume/stop.
+- `tests/test_spatial_mem.py`: SQLite spatial memory operations, room definitions, and landmark queries.
+- `tests/test_voice_routing.py`: Rule-based deterministic command routing (English + Hindi) with NO Ollama calls.
+- `tests/test_telemetry.py`: REST and WebSocket endpoints, MJPEG feed, and emergency stop endpoint.
+- `tests/test_config.py`: Thresholds and configuration integrity.
 
 ---
 
-## Technical Details
-
-### Depth Perception (MiDaS)
-MiDaS provides **relative depth estimation**, not metric distance. The system classifies depth into proximity categories:
-- **VERY_CLOSE**: Immediate proximity (potential collision risk)
-- **CLOSE**: Nearby objects within reach
-- **MEDIUM**: Objects at moderate distance
-- **FAR**: Distant objects
-
-These categories are based on empirical thresholds and may need tuning for different cameras/lighting conditions.
-
-### Currency Detection
-The currency detector combines OCR and color analysis with heuristic confidence categories:
-- **HIGH**: Both OCR and color agree on denomination
-- **MEDIUM**: OCR detected, or weak agreement
-- **LOW**: Color analysis only
-
-Confidence is heuristic, not statistically calibrated probability.
-
-### Safety & Concurrency
-Vision processing (YOLO + MiDaS) runs continuously, even during voice commands. Safety-critical warnings can interrupt voice processing. Only routine announcements are suppressed during user interaction.
-
----
-
-## License
-
-[Add your license here]
-
-## Contributors
-
-[Add contributors here]
-
-## Acknowledgments
-
-- YOLOv8: Ultralytics
-- MiDaS: Intel ISL
-- EasyOCR: JaidedAI
-- OpenStreetMap: OSM Contributors
+## ⚠️ Known Limitations & Safety Advisory
+1. **Relative Depth**: MiDaS estimates relative inverse depth, not calibrated metric distance. Obstacle distances must be treated as proximity heuristics.
+2. **Fall Alerting**: Fall detection is an assistive alerting aid and is not certified for clinical diagnostic use.
+3. **Collision Avoidance**: Navigation instructions are directional suggestions for user orientation. The system does not replace a white cane or guide dog.

@@ -1,0 +1,87 @@
+name: Arduino UNO Q CI & Verification
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  python-test-suite:
+    name: Python Test Suite (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1 libglib2.0-0 portaudio19-dev libasound2-dev
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install pytest pytest-cov
+          pip install -r requirements.txt || pip install fastapi uvicorn opencv-python-headless numpy Pillow requests pydantic
+
+      - name: Run Hardware-Independent Pytest Suite
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: 1
+        run: |
+          python -m pytest -v --tb=short
+
+  dashboard-build:
+    name: Caregiver Dashboard Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: caregiver_dashboard
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: caregiver_dashboard/package-lock.json
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Build Dashboard
+        run: npm run build
+
+  architecture-integrity:
+    name: Check Zero-ESP32 & Zero-Ollama Integrity
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Verify No Active ESP32 Endpoints
+        run: |
+          echo "Checking for active ESP32 IP endpoints in production code..."
+          ! grep -rn "192.168.4." --exclude-dir=legacy --exclude-dir=.git --exclude="*.md" .
+          echo "✅ No legacy ESP32 IPs found outside legacy/ directory."
+
+      - name: Verify Ollama Dependency Disabled
+        run: |
+          echo "Verifying LLM_ENABLED is disabled in config..."
+          grep "LLM_ENABLED = False" config.py
+          echo "✅ LLM_ENABLED is confirmed False."

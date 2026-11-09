@@ -96,7 +96,8 @@ class SpeechPriority(IntEnum):
     CRITICAL_SAFETY = 1   # Immediate collision/fall warning (interrupts everything)
     NAVIGATION      = 2   # Turn-by-turn guidance / imminent waypoint
     USER_COMMAND    = 3   # Direct command responses ("Yes?", "Torch on", etc.)
-    LLM_RESPONSE    = 4   # Conversational replies from Ollama
+    ASSISTANT_RESPONSE = 4  # Spoken assistance replies
+    LLM_RESPONSE    = 4   # Backward compatibility alias
     STATUS          = 5   # Periodic scene status / "Path is clear"
 
 
@@ -199,7 +200,8 @@ class SystemState:
             "tts": {"status": SubsystemHealth.OK, "time": time.time(), "details": ""},
             "yolo": {"status": SubsystemHealth.OK, "time": time.time(), "details": ""},
             "midas": {"status": SubsystemHealth.OK, "time": time.time(), "details": ""},
-            "ollama": {"status": SubsystemHealth.OK, "time": time.time(), "details": ""},
+            "mcu_bridge": {"status": SubsystemHealth.OK, "time": time.time(), "details": ""},
+            "imu": {"status": SubsystemHealth.OK, "time": time.time(), "details": ""},
             "localization": {"status": SubsystemHealth.OK, "time": time.time(), "details": ""},
             "navigation": {"status": SubsystemHealth.OK, "time": time.time(), "details": ""},
             "spatial_memory": {"status": SubsystemHealth.OK, "time": time.time(), "details": ""},

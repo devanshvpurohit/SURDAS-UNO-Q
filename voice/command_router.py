@@ -12,7 +12,7 @@ Hindi commands are handled without any explicit language switch.
 """
 import re
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from voice.app_launcher import open_app, close_app, get_app_list
 import voice.i18n_phrases as _p
@@ -46,12 +46,21 @@ class CommandRouter:
     in the same language.
     """
 
-    def __init__(self, brain: "SurdasBrain", llm: "LocalLLM"):
+    def __init__(self, brain: "SurdasBrain", llm: Optional["LocalLLM"] = None):
         self.brain = brain
         self.llm = llm
-        self.navigator = getattr(brain, "navigator", None)
-        self.indoor_navigator = getattr(brain, "indoor_navigator", None)
-        self.spatial_memory = getattr(brain, "spatial_memory", None)
+
+    @property
+    def indoor_navigator(self):
+        return getattr(self.brain, "indoor_navigator", None)
+
+    @property
+    def spatial_memory(self):
+        return getattr(self.brain, "spatial_memory", None)
+
+    @property
+    def navigator(self):
+        return getattr(self.brain, "navigator", None)
 
     # ─────────────────────────────────────────────────────────────────────────
     def route_command(self, raw_text: str, lang: str = "en") -> bool:
@@ -622,89 +631,26 @@ class CommandRouter:
         return True
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Category 6 — Model management commands
+    # Category 6 — System and Model Status Commands
     # ─────────────────────────────────────────────────────────────────────────
     def _handle_model_commands(self, text: str, lang: str) -> bool:
-
-        if _match(_p.MODEL_LIST, text):
-            msg = self.llm.spoken_model_list()
-            self.brain.voice.speak(msg, lang=lang)
+        if _match(_p.MODEL_CURRENT, text) or _match(_p.MODEL_LIST, text):
+            if lang == "hi":
+                self.brain.voice.speak("सूरदास अर्डुइनो यूनो क्यू पर योलो वी8एन मॉडल चला रहा है।", lang=lang)
+            else:
+                self.brain.voice.speak("SURDAS is running YOLOv8n object detection on Arduino UNO Q Linux.", lang=lang)
             return True
-
-        if _match(_p.MODEL_CURRENT, text):
-            self.brain.voice.speak(
-                f"I am using {self.llm.get_current_model()}.", lang=lang
-            )
-            return True
-
-        for trigger in ("switch to ", "use model ", "change model to ",
-                        "switch model to ", "use ", "load model "):
-            if trigger in text:
-                after = text[text.find(trigger) + len(trigger):].strip()
-                if after.startswith("model "):
-                    after = after[6:]
-                model_name = after.strip()
-                if not model_name:
-                    continue
-                if not re.search(r"[\d\.]", model_name) and model_name not in (
-                    "llama", "mistral", "gemma", "phi", "qwen", "deepseek",
-                    "tinyllama", "codellama", "dolphin", "vicuna", "orca",
-                ):
-                    continue
-
-                success = self.llm.switch_model(model_name)
-                if success:
-                    self.brain.voice.speak(
-                        f"Switched to {self.llm.get_current_model()}.", lang=lang
-                    )
-                    try:
-                        from telemetry import broadcast_event
-                        broadcast_event("model_change", {"model": self.llm.model_name})
-                    except Exception:
-                        pass
-                else:
-                    available = self.llm.get_available_models()
-                    names = ", ".join(m.replace(":latest", "") for m in available[:4])
-                    self.brain.voice.speak(
-                        f"Model {model_name} not found. Available: {names}.", lang=lang
-                    )
-                return True
-
         return False
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Category 7 — General LLM query (async via LLMWorker when available)
+    # Category 7 — Deterministic Spoken Fallback (Rule-Based, No LLM)
     # ─────────────────────────────────────────────────────────────────────────
     def _handle_llm_query(self, raw_text: str, lang: str = "en"):
-        # Try async LLMWorker first (never blocks the voice thread)
-        llm_worker = getattr(self.brain, "llm_worker", None)
-        if llm_worker is not None:
-            # Acknowledge immediately so user knows we heard them
-            if lang == "hi":
-                self.brain.voice.speak("सोच रहा हूँ…", lang="hi",
-                                       priority=__import__("system_state").SpeechPriority.USER_COMMAND)
-            else:
-                self.brain.voice.speak("Let me think…",
-                                       priority=__import__("system_state").SpeechPriority.USER_COMMAND)
-            llm_worker.submit(raw_text, lang=lang, vision_context=self.brain.get_vision_context())
-            return
+        """Deterministic rule-based reply when no specific intent matched."""
+        from system_state import SpeechPriority
+        if lang == "hi":
+            reply = f"मैंने सुना: '{raw_text}'। सूरदास अर्डुइनो यूनो क्यू पर काम कर रहा है। आप आसपास का वर्णन, कमरा याद करने, या नेविगेशन के लिए कह सकते हैं।"
+        else:
+            reply = f"I heard '{raw_text}'. I am running in deterministic mode on Arduino UNO Q. You can ask me to describe surroundings, guide you to a destination, or label a room."
 
-        # Fallback: synchronous streaming (blocks voice thread)
-        if not self.llm.is_available():
-            if lang == "hi":
-                self.brain.voice.speak(
-                    "Ollama नहीं चल रहा। ollama serve चलाएँ।", lang="hi"
-                )
-            else:
-                self.brain.voice.speak(
-                    "Ollama is not running. Start it with: ollama serve."
-                )
-            return
-
-        print("[ROUTER] → Ollama LLM (streaming, synchronous fallback)…")
-        vision_ctx = self.brain.get_vision_context()
-
-        for sentence in self.llm.query(raw_text, vision_context=vision_ctx, lang=lang):
-            if sentence:
-                print(f"[LLM] {sentence}")
-                self.brain.voice.speak(sentence, lang=lang)
+        self.brain.voice.speak(reply, lang=lang, priority=SpeechPriority.USER_COMMAND)

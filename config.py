@@ -22,12 +22,17 @@ CACHE_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CAMERA / ESP32 SETTINGS
+# CAMERA SETTINGS (Arduino UNO Q Linux / V4L2)
 # ─────────────────────────────────────────────────────────────────────────────
-ESP32_IP = os.getenv("SURDAS_ESP32_IP", "192.168.4.1")
-STREAM_URL = f"http://{ESP32_IP}/stream"
-LED_URL = f"http://{ESP32_IP}/led"
-CAMERA_FALLBACK = int(os.getenv("SURDAS_CAMERA_FALLBACK", "0"))  # Local webcam index
+# No ESP32 dependency. Supports local USB/V4L2 camera auto-discovery and mock fallback.
+CAMERA_DEVICE = os.getenv("SURDAS_CAMERA_DEVICE", "auto")  # "auto", "/dev/video0", 0, or "mock"
+CAMERA_TARGET_FPS = float(os.getenv("SURDAS_CAMERA_FPS", "15.0"))
+CAMERA_WIDTH = int(os.getenv("SURDAS_CAMERA_WIDTH", "640"))
+CAMERA_HEIGHT = int(os.getenv("SURDAS_CAMERA_HEIGHT", "480"))
+ALLOW_MOCK_CAMERA = os.getenv("SURDAS_ALLOW_MOCK_CAMERA", "true").lower() == "true"
+
+# Backward compatibility alias for legacy references
+CAMERA_FALLBACK = 0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # COMPUTE DEVICE
@@ -110,14 +115,30 @@ NAV_ARRIVAL_THRESHOLD_M = float(os.getenv("SURDAS_NAV_ARRIVAL", "15.0"))
 NAV_PROGRESS_ANNOUNCE_MIN_M = float(os.getenv("SURDAS_NAV_PROGRESS_MIN", "100.0"))
 
 # ─────────────────────────────────────────────────────────────────────────────
-# VOICE / LLM SETTINGS
+# VOICE & DETERMINISTIC COMMAND ROUTING SETTINGS
 # ─────────────────────────────────────────────────────────────────────────────
-LLM_DEFAULT_MODEL = os.getenv("SURDAS_LLM_MODEL", "gemma2:2b")
-LLM_BASE_URL = os.getenv("SURDAS_LLM_URL", "http://localhost:11434")
+# Ollama and all LLM dependencies are DISABLED for this Arduino UNO Q phase.
+LLM_ENABLED = False
+LLM_DEFAULT_MODEL = ""
+LLM_BASE_URL = ""
 
 # Voice activity detection
 VAD_SAMPLE_RATE = int(os.getenv("SURDAS_VAD_SAMPLE_RATE", "16000"))
 VAD_CHUNK_SIZE = int(os.getenv("SURDAS_VAD_CHUNK_SIZE", "512"))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SENSOR / IMU SETTINGS (Arduino UNO Q MCU)
+# ─────────────────────────────────────────────────────────────────────────────
+IMU_SOURCE = os.getenv("SURDAS_IMU_SOURCE", "auto")  # "bridge", "simulation", "none"
+IMU_SIMULATION_ENABLED = os.getenv("SURDAS_IMU_SIMULATION", "true").lower() == "true"
+FALL_DETECTION_ENABLED = os.getenv("SURDAS_FALL_DETECTION_ENABLED", "true").lower() == "true"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ARDUINO UNO Q BRIDGE SETTINGS
+# ─────────────────────────────────────────────────────────────────────────────
+UNO_Q_BRIDGE_PORT = os.getenv("SURDAS_BRIDGE_PORT", "")  # auto-detected if empty
+UNO_Q_BRIDGE_BAUD = int(os.getenv("SURDAS_BRIDGE_BAUD", "115200"))
+UNO_Q_ENABLE_MOCK_BRIDGE = os.getenv("SURDAS_MOCK_BRIDGE", "true").lower() == "true"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CURRENCY DETECTION

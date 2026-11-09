@@ -16,42 +16,61 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["TORCH_HOME"] = os.path.expanduser("~/.cache/torch")
 
 # ── CLI argument parsing (must happen before heavy imports) ──────────────────
-_parser = argparse.ArgumentParser(description="SURDAS Assistive Vision Brain")
+_parser = argparse.ArgumentParser(description="SURDAS Assistive Vision Brain for Arduino UNO Q")
 _parser.add_argument(
-    "--model", "-m",
-    default="",
-    metavar="MODEL",
-    help="Ollama model name to use for LLM. Defaults to gemma3:1b.",
+    "--camera", "-c",
+    default=None,
+    metavar="CAMERA",
+    help="Camera device path, index, or 'mock'. Defaults to auto-discovery.",
+)
+_parser.add_argument(
+    "--mock-camera",
+    action="store_true",
+    help="Force mock camera simulation.",
+)
+_parser.add_argument(
+    "--mock-sensors",
+    action="store_true",
+    help="Enable simulated IMU sensor data.",
 )
 _parser.add_argument(
     "--mic",
     default=None,
     metavar="DEVICE",
-    help="Audio input device name keyword or index (e.g. 'airpods', 'boat', 'buds', '0'). Auto-detects TWS by default.",
+    help="Audio input device name keyword or index. Auto-detects by default.",
 )
 _parser.add_argument(
     "--mic-gain",
     type=float,
     default=1.0,
     metavar="GAIN",
-    help="Software gain multiplier for microphone (e.g. 1.5, 2.0, 2.5 for quiet TWS). Defaults to 1.8x for TWS.",
+    help="Software gain multiplier for microphone. Defaults to 1.0.",
 )
 _parser.add_argument(
     "--gui",
     action="store_true",
-    help="Launch PyQt5 desktop GUI instead of terminal mode.",
+    help="Launch desktop GUI instead of headless/terminal mode.",
+)
+_parser.add_argument(
+    "--headless",
+    action="store_true",
+    help="Run without displaying OpenCV video window.",
 )
 _args, _ = _parser.parse_known_args()
-LLM_MODEL = _args.model  # empty string = use LocalLLM default (gemma3:1b)
+CLI_CAMERA = "mock" if _args.mock_camera else _args.camera
+CLI_MOCK_SENSORS = _args.mock_sensors
 MIC_DEVICE = _args.mic
 MIC_GAIN = _args.mic_gain
 USE_GUI = _args.gui
+CLI_HEADLESS = _args.headless
+LLM_MODEL = ""
 
 # Get script directory for path resolution (DO NOT change working directory)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Import configuration BEFORE other modules
 import sys
+from typing import Optional, List, Dict, Any, Tuple
 sys.path.insert(0, SCRIPT_DIR)
 from config import *
 
@@ -67,29 +86,27 @@ import easyocr
 
 from voice.tts import VoiceEngine
 from voice.assistant import VoiceAssistant
-from voice.llm import LocalLLM
 from voice.app_launcher import open_app, close_app
-from telemetry import start_telemetry, broadcast_event
+from telemetry import (
+    start_telemetry, broadcast_event, set_frame_getter,
+    set_imu_provider, set_bridge
+)
+from hal import (
+    create_camera_provider, create_imu_provider,
+    MockMicrocontrollerBridge, UnoQBridge
+)
 from system_state import (
     SystemState, SpeechPriority, VisionState, CameraState,
     NavigationState, SubsystemHealth
 )
-from workers import VisionWorker, SafetyWorker, LLMWorker
+from workers import VisionWorker, SafetyWorker
 
 # =====================================================
 # CONFIGURATION
 # =====================================================
-# Camera settings from config
-ESP32_IP = ESP32_IP  # from config.py
-STREAM_URL = STREAM_URL  # from config.py
-LED_URL = LED_URL  # from config.py
-
 # Best available compute accelerator (CUDA / Apple Silicon MPS / CPU)
 DEVICE = get_device()
-
-print(f"[SYSTEM] Hardware Acceleration: {DEVICE}")
-if LLM_MODEL:
-    print(f"[SYSTEM] LLM Model (CLI): {LLM_MODEL}")
+print(f"[SYSTEM] Platform: Arduino UNO Q | Compute Device: {DEVICE}")
 
 
 # =====================================================
@@ -144,14 +161,32 @@ class SurdasBrain:
         
         # 1. TTS Voice Output Engine
         self.voice = VoiceEngine()
-        self.voice.speak("SURDAS Vision and Voice System starting.")
+        self.voice.speak("SURDAS Vision and Navigation System starting on Arduino UNO Q.")
 
-        # Connect to ESP32 stream in background
-        print(f"[STREAM] Connecting to: {STREAM_URL}")
-        self.stream = CameraStream(STREAM_URL)
+        # Initialize Camera Provider (Linux V4L2 auto-discovery or mock)
+        cam_dev = CLI_CAMERA if CLI_CAMERA is not None else CAMERA_DEVICE
+        allow_mock = ALLOW_MOCK_CAMERA or (CLI_CAMERA == "mock")
+        print(f"[CAMERA] Initializing CameraProvider (device={cam_dev}, allow_mock={allow_mock})...")
+        self.camera = create_camera_provider(cam_dev, allow_mock=allow_mock)
+        self.stream = self.camera  # Backwards compatibility alias for workers
 
-        # 2. Parallel AI Model Loading (YOLOv8, MiDaS, EasyOCR, Voice/Whisper)
-        print("[SYSTEM] ⚡ Loading AI models in parallel (YOLOv8, MiDaS, EasyOCR, Whisper/Voice)...")
+        # Motion & IMU Sensor Provider
+        enable_sim = CLI_MOCK_SENSORS or IMU_SIMULATION_ENABLED
+        self.imu_provider = create_imu_provider(enable_simulation=enable_sim)
+
+        # Microcontroller Bridge (Arduino UNO Q STM32)
+        if UNO_Q_ENABLE_MOCK_BRIDGE:
+            self.mcu_bridge = MockMicrocontrollerBridge()
+        else:
+            self.mcu_bridge = UnoQBridge(port=UNO_Q_BRIDGE_PORT or None, baudrate=UNO_Q_BRIDGE_BAUD)
+
+        # Connect providers to unified telemetry service
+        set_frame_getter(self.get_latest_jpeg)
+        set_imu_provider(self.imu_provider)
+        set_bridge(self.mcu_bridge)
+
+        # 2. Parallel AI Model Loading (YOLOv8, MiDaS, EasyOCR, Voice)
+        print("[SYSTEM] ⚡ Loading models in parallel (YOLOv8, MiDaS, EasyOCR, Voice)...")
         t0_load = time.time()
 
         def _load_yolo():
@@ -190,17 +225,12 @@ class SurdasBrain:
             self.ocr = easyocr.Reader(['en', 'hi'], gpu=(DEVICE == "cuda"), download_enabled=False)
             print("[AI] ✅ EasyOCR loaded (en + hi).")
 
-
         def _load_voice():
-            self.llm = LocalLLM(model_name=LLM_MODEL)
-            if self.llm.is_available():
-                print(f"[AI] ✅ Ollama ready — model: {self.llm.model_name}")
-            else:
-                print("[AI] Ollama not detected. Start with: ollama serve")
+            self.llm = None  # Disabled for Arduino UNO Q deterministic phase
             try:
                 self.voice_assistant = VoiceAssistant(self, mic_device=MIC_DEVICE, mic_gain=MIC_GAIN)
                 self.voice_assistant.start()
-                print("[AI] ✅ Voice Assistant active.")
+                print("[AI] ✅ Voice Assistant active (deterministic rule-based).")
             except Exception as e:
                 print(f"[VOICE] Voice Assistant warning: {e}. Vision continues normally.")
                 self.voice_assistant = None
@@ -217,13 +247,16 @@ class SurdasBrain:
             f_ocr.result()
             f_voice.result()
 
-        print(f"[SYSTEM] 🚀 All AI models loaded in parallel in {time.time() - t0_load:.2f}s!")
+        print(f"[SYSTEM] 🚀 Models loaded in parallel in {time.time() - t0_load:.2f}s!")
 
-        self.mode = "NAV"  # 'NAV' or 'OCR' or 'AI_VOICE'
+        self.mode = "NAV"  # 'NAV' or 'OCR'
         self.last_speech_time = 0
         self.last_spoken = ""
         self.led_on = False
         self.conf_threshold = YOLO_CONFIDENCE_THRESHOLD
+        self.headless = CLI_HEADLESS or HEADLESS_MODE
+        self.latest_display_frame = None
+        self.log_history = []
         
         # AI Voice Mode state
         self.ai_voice_mode = False
@@ -244,9 +277,8 @@ class SurdasBrain:
         self.safety_worker = SafetyWorker(self, self.vision_worker)
         self.safety_worker.start()
 
-        # LLMWorker: fully async — user commands never block waiting for Ollama
-        self.llm_worker = LLMWorker(self)
-        self.llm_worker.start()
+        # LLMWorker is omitted in deterministic phase
+        self.llm_worker = None
         
         # Offline Navigation with proper location provider
         from navigation import OfflineMapManager, Navigator
@@ -398,14 +430,23 @@ class SurdasBrain:
         except Exception as e:
             return {"available": False, "error": str(e)}
 
+    def get_latest_jpeg(self) -> Optional[bytes]:
+        """Encodes latest display frame to JPEG bytes for MJPEG streaming."""
+        frame = self.latest_display_frame
+        if frame is not None:
+            ret, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            if ret:
+                return buf.tobytes()
+        return None
+
     def toggle_esp32_led(self, state: bool):
-        """Toggles the ESP32-CAM flash torch."""
-        try:
-            val = "on" if state else "off"
-            urllib.request.urlopen(f"{LED_URL}?state={val}", timeout=0.8)
-            self.led_on = state
-        except Exception:
-            pass
+        """Toggles hardware illuminator via microcontroller bridge."""
+        if hasattr(self, "mcu_bridge") and self.mcu_bridge:
+            self.mcu_bridge.send_command("SET_LED", state=state)
+        self.led_on = state
+
+    def toggle_led(self, state: bool):
+        return self.toggle_esp32_led(state)
 
     def compute_depth(self, frame):
         """Computes dense relative depth map."""
@@ -885,25 +926,17 @@ class SurdasBrain:
                                         print("  (Echo detected, try again)\n")
                                         continue
                             
-                            # Send to LLM - THIS IS THE ONE QUESTION
-                            print("[AI_VOICE] 🤖 Ollama: ", end="", flush=True)
-                            response = ""
+                            # Route through deterministic command router (no Ollama required)
+                            print(f"[AI_VOICE] 🎯 Executing deterministic command: {text}")
                             try:
-                                for chunk_text in self.llm.query(text, vision_context=self.get_vision_context()):
-                                    response += chunk_text
-                                    print(chunk_text, end="", flush=True)
-                                print()
-                                
-                                if response.strip():
-                                    last_spoken_text = response
-                                    self.voice.speak(response, force=True)
-                                    while self.voice.is_speaking:
-                                        time.sleep(0.1)
-                                    print("[AI_VOICE] ✓")
-                                    
-                                    # Mark question as answered - will exit after this
-                                    question_answered = True
-                                    print("[AI_VOICE] Question answered. Exiting AI mode...\n")
+                                if self.voice_assistant and self.voice_assistant.router:
+                                    self.voice_assistant.router.route_command(text, lang=lang)
+                                else:
+                                    self.voice.speak(f"Command processed: {text}", lang=lang)
+                                while self.voice.is_speaking:
+                                    time.sleep(0.1)
+                                question_answered = True
+                                print("[AI_VOICE] Question answered. Exiting AI mode...\n")
                                     
                             except Exception as e:
                                 print(f"\n[AI_VOICE] Error: {e}")
@@ -947,25 +980,26 @@ class SurdasBrain:
 
     def run(self):
         print("\n" + "="*65)
-        print(" SURDAS ASSISTIVE VISION & VOICE ASSISTANT RUNNING")
+        print(" SURDAS UNO Q ASSISTIVE VISION & NAVIGATION PLATFORM")
         print(" Features:")
-        print("   • YOLOv8 Object & Obstacle Detection  (VisionWorker thread)")
-        print("   • MiDaS Dense Depth & Wall Detection  (VisionWorker thread)")
-        print("   • Natural Voice Assistant ('Hey Surdas')")
-        print("   • AI Voice Mode - Always listening (Press 'A')")
-        print("   • Async LLM — never blocks voice or safety")
-        print(" Controls: [N] Nav | [T] Text | [A] AI Voice | [L] Torch | [Q] Quit")
+        print("   • OpenCV / V4L2 Camera Provider (Linux MPU)")
+        print("   • YOLOv8 Object & Obstacle Detection (VisionWorker thread)")
+        print("   • MiDaS Dense Depth & Free-Space Perception")
+        print("   • Deterministic Indoor Navigation & Spatial Memory")
+        print("   • Rule-Based Voice Assistant (Bilingual EN/HI)")
+        print("   • STM32 MCU Bridge & Fall Detection Telemetry")
+        print(" Controls: [N] Nav | [T] Text/OCR | [A] Voice | [L] Illuminator | [Q] Quit")
         print("="*65 + "\n")
 
         while True:
-            # ── No camera frame yet (stream connecting) ─────────────────
+            # ── No camera frame yet (camera initializing) ───────────────
             if self.stream.get_frame() is None:
                 blank = np.zeros((360, 640, 3), dtype=np.uint8)
-                cv2.putText(blank, "Waiting for ESP32-CAM Stream...", (60, 160),
+                cv2.putText(blank, "Waiting for Camera Provider...", (60, 160),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
-                cv2.putText(blank, f"Connecting to {STREAM_URL}", (60, 200),
+                cv2.putText(blank, "SURDAS UNO Q Camera Provider initializing", (60, 200),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
-                cv2.putText(blank, "Make sure PC is connected to Wi-Fi: SURDAS_EYES", (60, 240),
+                cv2.putText(blank, "Connect a USB/V4L2 camera or enable mock provider", (60, 240),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 100), 1)
                 self.latest_display_frame = blank.copy()
                 if not self.headless:
@@ -1052,14 +1086,22 @@ class SurdasBrain:
         print("\n[SYSTEM] Shutting down workers...")
         self.vision_worker.stop()
         self.safety_worker.stop()
-        self.llm_worker.stop()
+        if self.llm_worker:
+            self.llm_worker.stop()
         if self.voice_assistant:
             self.voice_assistant.stop()
-        self.stream.stop()
+        if hasattr(self.stream, 'release'):
+            self.stream.release()
+        elif hasattr(self.stream, 'stop'):
+            self.stream.stop()
         cv2.destroyAllWindows()
         print("[SYSTEM] SURDAS shutdown complete.")
 
 
 if __name__ == "__main__":
-    brain = SurdasBrain()
-    brain.run()
+    if USE_GUI:
+        from surdas_gui_tk import main as gui_main
+        gui_main()
+    else:
+        brain = SurdasBrain()
+        brain.run()

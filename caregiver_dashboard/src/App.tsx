@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import './index.css';
 import { 
   Activity, MapPin, AlertTriangle, Clock, Shield, Video, Bell,
-  Camera, Circle, Wifi, Cpu, HardDrive, Thermometer, Users,
-  Heart, Navigation, Eye, Brain, Home, Settings, ChevronRight
+  Camera, Circle, Cpu, HardDrive, Users,
+  Heart, Navigation, Eye, Brain, Home, Settings
 } from 'lucide-react';
 
 // ==================== INTERFACES ====================
@@ -39,8 +39,9 @@ interface FallDetectorData {
   pitch: number;
   roll: number;
   falls: number;
-  state: 'NORMAL' | 'POSSIBLE_FALL' | 'IMPACT_DETECTED' | 'FALL_CONFIRMED';
-  mpu: 'OK' | 'ERROR';
+  state: 'NORMAL' | 'POSSIBLE_FALL' | 'FREEFALL' | 'IMPACT' | 'IMPACT_DETECTED' | 'FALL_CONFIRMED' | string;
+  source?: 'HARDWARE' | 'SIMULATION' | 'UNAVAILABLE' | string;
+  mpu?: string;
 }
 
 interface LogEntry {
@@ -66,10 +67,23 @@ interface SystemMetrics {
   temperature?: number;
 }
 
-const API = 'http://localhost:8000';
-const WS  = 'ws://localhost:8000/ws';
-const CONTROLLER_IP = '192.168.4.2';
-const VIDEO_FEED = 'http://localhost:8888/video_feed';
+const getBaseHost = () => {
+  if (typeof window !== 'undefined' && window.location.hostname) {
+    return window.location.hostname;
+  }
+  return 'localhost';
+};
+
+const getBasePort = () => {
+  if (typeof window !== 'undefined' && window.location.port) {
+    return window.location.port;
+  }
+  return '8000';
+};
+
+const API = import.meta.env.VITE_API_URL || `${typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'https:' : 'http:'}//${getBaseHost()}:${getBasePort()}`;
+const WS  = import.meta.env.VITE_WS_URL || `${typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${getBaseHost()}:${getBasePort()}/ws`;
+const VIDEO_FEED = `${API}/video_feed`;
 
 function App() {
   const [activeView, setActiveView] = useState<'overview' | 'live-safety' | 'navigation' | 'system-health'>('overview');
@@ -105,14 +119,20 @@ function App() {
 
   const fetchFallData = async () => {
     try {
-      const response = await fetch(`http://${CONTROLLER_IP}/imu`, { signal: AbortSignal.timeout(2000) });
+      const response = await fetch(`${API}/imu`, { signal: AbortSignal.timeout(2000) });
       const data = await response.json();
+      if (!data || data.source === 'UNAVAILABLE') {
+        setControllerConnected(false);
+        setFallData(null);
+        return;
+      }
       const prevState = fallData?.state;
       setFallData(data);
       setControllerConnected(true);
       
       if (data.state === 'FALL_CONFIRMED' && prevState !== 'FALL_CONFIRMED') {
-        addLog('fall', `🚨 FALL DETECTED! Total falls: ${data.falls}`, 'critical');
+        const tag = data.source === 'SIMULATION' ? '[SIMULATION] ' : '';
+        addLog('fall', `🚨 ${tag}FALL DETECTED! Total falls: ${data.falls}`, 'critical');
         setEmergencyMode(true);
       }
     } catch {
@@ -292,6 +312,19 @@ function App() {
           </div>
 
           <div className="flex items-center gap-4">
+            <button
+              onClick={async () => {
+                try {
+                  await fetch(`${API}/emergency_stop`, { method: 'POST' });
+                  addLog('system', '🛑 EMERGENCY STOP TRIGGERED FROM DASHBOARD', 'critical');
+                } catch {}
+              }}
+              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg flex items-center gap-1 shadow-sm transition-colors"
+              title="Immediate deterministic hardware stop"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              EMERGENCY STOP
+            </button>
             <div className="text-sm text-gray-500">{new Date().toLocaleTimeString()}</div>
             <button className="relative p-2 hover:bg-gray-100 rounded-lg">
               <Bell className="w-5 h-5 text-gray-600" />
@@ -457,38 +490,57 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Fall Detector */}
-                  {controllerConnected && fallData && (
-                    <div className="bg-white border border-gray-200 rounded-xl p-6">
-                      <div className="flex items-center gap-2 mb-4">
-                        <Heart className="w-5 h-5 text-gray-700" />
-                        <h3 className="text-base font-semibold text-gray-900">Fall Detector</h3>
-                      </div>
-                      <div className={`p-4 rounded-lg text-center mb-4 ${
-                        fallData.state === 'NORMAL' ? 'bg-green-50 border border-green-200' :
-                        fallData.state === 'POSSIBLE_FALL' ? 'bg-yellow-50 border border-yellow-200' :
-                        'bg-red-50 border border-red-200'
-                      }`}>
-                        <div className={`text-base font-bold ${
-                          fallData.state === 'NORMAL' ? 'text-green-900' :
-                          fallData.state === 'POSSIBLE_FALL' ? 'text-yellow-900' :
-                          'text-red-900'
-                        }`}>
-                          {fallData.state.replace('_', ' ')}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="bg-gray-50 p-3 rounded-lg text-center">
-                          <div className="text-xl font-bold text-gray-900">{fallData.acceleration.toFixed(1)}</div>
-                          <div className="text-xs text-gray-500">m/s²</div>
-                        </div>
-                        <div className="bg-gray-50 p-3 rounded-lg text-center">
-                          <div className="text-xl font-bold text-gray-900">{fallData.falls}</div>
-                          <div className="text-xs text-gray-500">Total Falls</div>
-                        </div>
-                      </div>
+                  {/* Fall & Motion Detector */}
+                  <div className="bg-white border border-gray-200 rounded-xl p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Heart className="w-5 h-5 text-gray-700" />
+                      <h3 className="text-base font-semibold text-gray-900">Fall Detector</h3>
+                      {fallData?.source === 'SIMULATION' ? (
+                        <span className="ml-auto text-xs font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                          SIMULATION
+                        </span>
+                      ) : controllerConnected && fallData?.source === 'HARDWARE' ? (
+                        <span className="ml-auto text-xs font-semibold px-2 py-0.5 rounded bg-green-100 text-green-800 border border-green-300">
+                          STM32 HARDWARE
+                        </span>
+                      ) : (
+                        <span className="ml-auto text-xs font-medium px-2 py-0.5 rounded bg-gray-100 text-gray-600">
+                          UNAVAILABLE
+                        </span>
+                      )}
                     </div>
-                  )}
+                    {controllerConnected && fallData ? (
+                      <>
+                        <div className={`p-4 rounded-lg text-center mb-4 ${
+                          fallData.state === 'NORMAL' ? 'bg-green-50 border border-green-200' :
+                          fallData.state === 'POSSIBLE_FALL' || fallData.state === 'TILT_WARNING' ? 'bg-yellow-50 border border-yellow-200' :
+                          'bg-red-50 border border-red-200'
+                        }`}>
+                          <div className={`text-base font-bold ${
+                            fallData.state === 'NORMAL' ? 'text-green-900' :
+                            fallData.state === 'POSSIBLE_FALL' || fallData.state === 'TILT_WARNING' ? 'text-yellow-900' :
+                            'text-red-900'
+                          }`}>
+                            {fallData.state.replace('_', ' ')}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="bg-gray-50 p-3 rounded-lg text-center">
+                            <div className="text-xl font-bold text-gray-900">{typeof fallData.acceleration === 'number' ? fallData.acceleration.toFixed(1) : '0.0'}</div>
+                            <div className="text-xs text-gray-500">m/s²</div>
+                          </div>
+                          <div className="bg-gray-50 p-3 rounded-lg text-center">
+                            <div className="text-xl font-bold text-gray-900">{fallData.falls}</div>
+                            <div className="text-xs text-gray-500">Total Falls</div>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-xs text-gray-500 italic py-2">
+                        No physical IMU sensor attached to Arduino UNO Q. Monitoring unavailable.
+                      </p>
+                    )}
+                  </div>
 
                   {/* Quick Actions */}
                   <div className="bg-white border border-gray-200 rounded-xl p-6">

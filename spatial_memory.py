@@ -357,13 +357,14 @@ class SpatialMemory:
             object_id
         """
         now = time.time()
+        cat_val = category.value if hasattr(category, "value") else str(category)
         with self._lock:
             conn = sqlite3.connect(self.db_path)
             try:
                 cursor = conn.execute(
                     """INSERT INTO objects (label, category, x, y, z, confidence, room_id, last_seen, created_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (label, category.value, x, y, z, confidence, room_id, now, now)
+                    (label, cat_val, x, y, z, confidence, room_id, now, now)
                 )
                 obj_id = cursor.lastrowid
                 conn.commit()
