@@ -65,11 +65,14 @@ if [ ! -d "$INSTALL_DIR/venv" ]; then
   python3 -m venv "$INSTALL_DIR/venv"
 fi
 
-"$INSTALL_DIR/venv/bin/pip" install --upgrade pip setuptools wheel
-echo "📦 Installing Python dependencies from requirements.txt..."
-"$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" || {
+echo "🧹 Purging stale pip cache to reclaim flash storage..."
+"$INSTALL_DIR/venv/bin/pip" cache purge 2>/dev/null || true
+
+"$INSTALL_DIR/venv/bin/pip" install --no-cache-dir --upgrade pip setuptools wheel
+echo "📦 Installing Torch-Free lightweight dependencies from requirements.txt..."
+"$INSTALL_DIR/venv/bin/pip" install --no-cache-dir -r "$INSTALL_DIR/requirements.txt" || {
   echo "⚠️  Fallback: installing essential headless packages directly..."
-  "$INSTALL_DIR/venv/bin/pip" install fastapi uvicorn opencv-python-headless numpy Pillow requests pydantic pyserial
+  "$INSTALL_DIR/venv/bin/pip" install --no-cache-dir fastapi uvicorn opencv-python-headless numpy Pillow requests pydantic pyserial
 }
 
 # 6. Verify Caregiver Dashboard Build

@@ -75,14 +75,28 @@ sys.path.insert(0, SCRIPT_DIR)
 from config import *
 
 import cv2
-import torch
 import numpy as np
 import threading
 import queue
 import time
 import urllib.request
-from ultralytics import YOLO
-import easyocr
+
+try:
+    import torch
+except ImportError:
+    torch = None
+
+try:
+    from ultralytics import YOLO
+except ImportError:
+    YOLO = None
+
+try:
+    import easyocr
+except ImportError:
+    easyocr = None
+
+from hal.vision import LightweightYOLO, GeometricDepthProvider
 
 from voice.tts import VoiceEngine
 from voice.assistant import VoiceAssistant
@@ -188,42 +202,53 @@ class SurdasBrain:
         # 2. Parallel AI Model Loading (YOLOv8, MiDaS, EasyOCR, Voice)
         print("[SYSTEM] ⚡ Loading models in parallel (YOLOv8, MiDaS, EasyOCR, Voice)...")
         t0_load = time.time()
+        self.geometric_depth = GeometricDepthProvider()
 
         def _load_yolo():
-            # Use config system to get model path
             yolo_path = get_yolo_model_path()
-            self.yolo = YOLO(yolo_path)
-            print(f"[AI] ✅ YOLOv8 loaded from {yolo_path}")
+            if YOLO is not None:
+                try:
+                    self.yolo = YOLO(yolo_path)
+                    print(f"[AI] ✅ YOLOv8 loaded from {yolo_path}")
+                    return
+                except Exception as e:
+                    print(f"[AI] YOLO load note: {e}. Using Lightweight Torch-Free YOLO.")
+            self.yolo = LightweightYOLO(yolo_path)
+            print("[AI] ✅ Lightweight Torch-Free YOLO active (OpenCV).")
 
         def _load_midas():
-            # Use config system
-            midas_cache_str = str(MIDAS_CACHE_DIR)
-            ft_midas_path = get_midas_model_path()
-
-            # Load transforms — always from local cache
-            if not MIDAS_CACHE_DIR.exists():
-                raise RuntimeError(
-                    f"[AI] MiDaS local cache not found at {MIDAS_CACHE_DIR}. "
-                    "Run setup_offline_models.py while online first."
-                )
-            midas_transforms = torch.hub.load(midas_cache_str, "transforms", source="local")
-            self.transform = midas_transforms.small_transform
-
-            if ft_midas_path:
-                print(f"[AI] Using fine-tuned MiDaS_small from {ft_midas_path}")
-                base = torch.hub.load(midas_cache_str, "MiDaS_small", source="local", pretrained=False)
-                state = torch.load(ft_midas_path, map_location="cpu")
-                base.load_state_dict(state)
-                self.midas = base.to(DEVICE).eval()
-            else:
-                self.midas = torch.hub.load(
-                    midas_cache_str, "MiDaS_small", source="local", pretrained=True
-                ).to(DEVICE).eval()
-            print("[AI] ✅ MiDaS Depth Estimator loaded.")
+            if torch is not None and MIDAS_CACHE_DIR.exists():
+                try:
+                    midas_cache_str = str(MIDAS_CACHE_DIR)
+                    ft_midas_path = get_midas_model_path()
+                    midas_transforms = torch.hub.load(midas_cache_str, "transforms", source="local")
+                    self.transform = midas_transforms.small_transform
+                    if ft_midas_path:
+                        base = torch.hub.load(midas_cache_str, "MiDaS_small", source="local", pretrained=False)
+                        state = torch.load(ft_midas_path, map_location="cpu")
+                        base.load_state_dict(state)
+                        self.midas = base.to(DEVICE).eval()
+                    else:
+                        self.midas = torch.hub.load(
+                            midas_cache_str, "MiDaS_small", source="local", pretrained=True
+                        ).to(DEVICE).eval()
+                    print("[AI] ✅ MiDaS Depth Estimator loaded via PyTorch.")
+                    return
+                except Exception as e:
+                    print(f"[AI] MiDaS load note: {e}. Using Lightweight Geometric Depth.")
+            self.midas = None
+            print("[AI] ✅ Lightweight Torch-Free Geometric Depth active (OpenCV).")
 
         def _load_ocr():
-            self.ocr = easyocr.Reader(['en', 'hi'], gpu=(DEVICE == "cuda"), download_enabled=False)
-            print("[AI] ✅ EasyOCR loaded (en + hi).")
+            if easyocr is not None:
+                try:
+                    self.ocr = easyocr.Reader(['en', 'hi'], gpu=(DEVICE == "cuda"), download_enabled=False)
+                    print("[AI] ✅ EasyOCR loaded (en + hi).")
+                    return
+                except Exception:
+                    pass
+            self.ocr = None
+            print("[AI] ℹ️  EasyOCR skipped (torch-free mode). Vision & navigation fully active.")
 
         def _load_voice():
             self.llm = None  # Disabled for Arduino UNO Q deterministic phase
@@ -450,19 +475,27 @@ class SurdasBrain:
 
     def compute_depth(self, frame):
         """Computes dense relative depth map."""
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        input_tensor = self.transform(rgb).to(DEVICE)
-        
-        with torch.no_grad():
-            depth = self.midas(input_tensor)
-            depth = torch.nn.functional.interpolate(
-                depth.unsqueeze(1),
-                size=frame.shape[:2],
-                mode="bicubic",
-                align_corners=False
-            ).squeeze()
+        if hasattr(self, "midas") and self.midas is not None and torch is not None:
+            try:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                input_tensor = self.transform(rgb).to(DEVICE)
+                with torch.no_grad():
+                    depth = self.midas(input_tensor)
+                    depth = torch.nn.functional.interpolate(
+                        depth.unsqueeze(1),
+                        size=frame.shape[:2],
+                        mode="bicubic",
+                        align_corners=False
+                    ).squeeze()
+                depth_np = depth.cpu().numpy()
+                depth_vis = cv2.normalize(depth_np, None, 0, 255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+                return depth_np, depth_vis
+            except Exception:
+                pass
 
-        depth_np = depth.cpu().numpy()
+        if not hasattr(self, "geometric_depth") or self.geometric_depth is None:
+            self.geometric_depth = GeometricDepthProvider()
+        depth_np = self.geometric_depth.estimate_depth(frame)
         depth_vis = cv2.normalize(depth_np, None, 0, 255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         return depth_np, depth_vis
 
@@ -751,6 +784,11 @@ class SurdasBrain:
 
     def process_ocr(self, frame):
         """Document / Sign Text Reading Mode."""
+        if self.ocr is None:
+            self.voice.speak("Text reading is not enabled in lightweight mode.")
+            self.mode = "NAV"
+            return
+
         self.toggle_esp32_led(True)
         self.voice.speak("Reading text...")
         time.sleep(0.3)

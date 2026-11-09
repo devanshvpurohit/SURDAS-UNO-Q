@@ -176,17 +176,17 @@ HEADLESS_MODE = os.getenv("SURDAS_HEADLESS", "false").lower() == "true"
 
 def get_device():
     """Determine best available compute device."""
-    import torch
-    
-    if DEVICE.lower() != "auto":
-        return DEVICE.lower()
-    
-    if torch.cuda.is_available():
-        return "cuda"
-    elif torch.backends.mps.is_available():
-        return "mps"
-    else:
-        return "cpu"
+    try:
+        import torch
+        if DEVICE.lower() != "auto":
+            return DEVICE.lower()
+        if torch.cuda.is_available():
+            return "cuda"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+    except (ImportError, Exception):
+        pass
+    return "cpu"
 
 
 def get_yolo_model_path():

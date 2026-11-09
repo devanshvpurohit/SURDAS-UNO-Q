@@ -1,5 +1,8 @@
 import numpy as np
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None
 import os
 
 _OFFLINE_MODE = os.environ.get("OFFLINE_MODE", "0") == "1"
@@ -38,6 +41,8 @@ class VoiceActivityDetector:
         return None
 
     def _init_silero(self):
+        if torch is None:
+            return
         if _OFFLINE_MODE:
             # Strict offline — only attempt if cache is confirmed present.
             cached_dir = self._find_local_cache()
