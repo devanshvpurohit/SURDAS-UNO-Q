@@ -116,19 +116,19 @@ Features available in the dashboard:
 
 ---
 
-## 🧪 Manual Execution & Simulation Mode
+## 🧪 Manual Execution & Single-Command Launcher
 
-For bench testing or development when physical sensors and cameras are not yet wired:
+To start the system manually with a single command without the background systemd service:
 
 ```bash
-# Activate Python virtual environment:
-source /opt/surdas/venv/bin/activate
+# Standard startup (auto-detects hardware and starts dashboard on :8000):
+./start.sh
 
-# Run in headless simulation mode:
-python3 surdas_brain.py --headless --mock-camera --mock-sensors --no-voice
+# Or force simulation mode on a development computer:
+./start.sh --sim
 ```
 
-All 60 hardware-independent test cases can be verified at any time:
+All 61 hardware-independent test cases can be verified at any time:
 ```bash
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -v
 ```

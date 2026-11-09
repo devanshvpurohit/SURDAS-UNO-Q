@@ -93,6 +93,25 @@ flowchart TD
 
 ---
 
+## ⚡ One Command to Start SURDAS
+
+To start the entire system with automatic hardware detection and Caregiver Dashboard on port `8000`:
+
+```bash
+./start.sh
+```
+*(Or cross-platform: `python3 start.py`)*
+
+Common flags:
+- `./start.sh` : Standard startup (auto-detects USB camera & STM32 bridge, runs headless).
+- `./start.sh --sim` : Force full simulation mode (mock camera + mock sensor physics).
+- `./start.sh --gui` : Launch desktop OpenCV preview window instead of headless mode.
+- `./start.sh --camera /dev/video0` : Specify explicit camera path.
+
+Once started, open `http://<arduino-uno-q-ip>:8000` (or `http://localhost:8000`) in any web browser to view the Caregiver Dashboard.
+
+---
+
 ## 🚀 Quickstart & Deployment
 
 Detailed instructions for deploying on physical Arduino UNO Q hardware are in [DEPLOYMENT.md](DEPLOYMENT.md).
