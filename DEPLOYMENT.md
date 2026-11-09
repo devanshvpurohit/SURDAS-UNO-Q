@@ -67,7 +67,7 @@ The standard Arduino UNO Q header has been mapped to prevent bus and pin content
 ### Step 1: Clone from GitHub on Arduino UNO Q
 SSH into the Arduino UNO Q Debian terminal and clone the repository:
 ```bash
-git clone https://github.com/devanshvpurohit/VNR.git /opt/surdas
+git clone https://github.com/devanshvpurohit/SURDAS-UNO-Q.git /opt/surdas
 cd /opt/surdas
 ```
 

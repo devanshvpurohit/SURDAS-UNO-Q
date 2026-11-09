@@ -1,6 +1,6 @@
 # SURDAS UNO Q — Assistive Vision & Navigation System
 
-[![Arduino UNO Q CI](https://github.com/devanshvpurohit/VNR/actions/workflows/uno_q_ci.yml/badge.svg)](https://github.com/devanshvpurohit/VNR/actions/workflows/uno_q_ci.yml)
+[![Arduino UNO Q CI](https://github.com/devanshvpurohit/SURDAS-UNO-Q/actions/workflows/uno_q_ci.yml/badge.svg)](https://github.com/devanshvpurohit/SURDAS-UNO-Q/actions/workflows/uno_q_ci.yml)
 ![Platform](https://img.shields.io/badge/Platform-Arduino%20UNO%20Q-00979D?logo=arduino)
 ![Linux MPU](https://img.shields.io/badge/MPU-Qualcomm%20QRB2210-red)
 ![MCU](https://img.shields.io/badge/MCU-STM32U585%20Cortex--M33-orange)
@@ -119,7 +119,7 @@ Detailed instructions for deploying on physical Arduino UNO Q hardware are in [D
 ### Automated Setup on Arduino UNO Q (Debian Linux)
 ```bash
 # 1. Clone repository on the board
-git clone https://github.com/devanshvpurohit/VNR.git /opt/surdas
+git clone https://github.com/devanshvpurohit/SURDAS-UNO-Q.git /opt/surdas
 cd /opt/surdas
 
 # 2. Run automated bootstrap (installs apt packages, venv, dashboard build)
